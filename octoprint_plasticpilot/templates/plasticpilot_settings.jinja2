@@ -1,0 +1,137 @@
+<div class="row-fluid">
+	<h3>{{ _('Plastic Pilot Settings') }}</h3>
+
+	<!-- Controller Selection -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Controller Device') }}</label>
+		<div class="controls">
+			<select data-bind="options: availableControllers,
+							 optionsText: 'name',
+							 optionsValue: 'id',
+							 value: selectedController">
+			</select>
+			<button class="btn" data-bind="click: refreshControllers">
+				{{ _('Refresh') }}
+			</button>
+		</div>
+	</div>
+
+	<!-- Controller Status -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Controller Status') }}</label>
+		<div class="controls">
+			<div class="btn-group">
+				<button class="btn" data-bind="click: activateController,
+											 enable: !isControllerActive() && selectedController(),
+											 css: { 'btn-success': !isControllerActive() }">
+					{{ _('Activate') }}
+				</button>
+				<button class="btn" data-bind="click: deactivateController,
+											 enable: isControllerActive,
+											 css: { 'btn-danger': isControllerActive }">
+					{{ _('Deactivate') }}
+				</button>
+			</div>
+			<span class="help-inline" data-bind="text: controllerStatusText"></span>
+		</div>
+	</div>
+
+	<!-- Debug Settings -->
+	<h4>{{ _('Debug Settings') }}</h4>
+	<div class="control-group">
+		<label class="control-label">{{ _('Debug Mode') }}</label>
+		<div class="controls">
+			<label class="checkbox">
+				<input type="checkbox" data-bind="checked: settings.debug_mode">
+				{{ _('Enable detailed input logging') }}
+			</label>
+			<span class="help-block">{{ _('When enabled, all controller inputs will be logged to OctoPrints log file') }}</span>
+		</div>
+	</div>
+
+	<!-- Movement Settings -->
+	<h4>{{ _('Movement Settings') }}</h4>
+	<div class="control-group">
+		<label class="control-label">{{ _('Base Speed') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: settings.base_speed"
+					   min="100" max="6000" step="100">
+				<span class="add-on">mm/min</span>
+			</div>
+			<span class="help-block">{{ _('Base movement speed for the controller (100-6000 mm/min)') }}</span>
+		</div>
+	</div>
+
+	<!-- Z-Height Settings -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Z Heights') }}</label>
+		<div class="controls">
+			<div class="row-fluid">
+				<div class="span6">
+					<label class="inline">{{ _('Drawing Height:') }}</label>
+					<div class="input-append">
+						<input type="number" class="input-mini" data-bind="value: settings.z_drawing"
+							   min="0" max="10" step="0.1">
+						<span class="add-on">mm</span>
+					</div>
+					<span class="help-block">{{ _('Z height when drawing (pen down)') }}</span>
+				</div>
+				<div class="span6">
+					<label class="inline">{{ _('Travel Height:') }}</label>
+					<div class="input-append">
+						<input type="number" class="input-mini" data-bind="value: settings.z_travel"
+							   min="0" max="10" step="0.1">
+						<span class="add-on">mm</span>
+					</div>
+					<span class="help-block">{{ _('Z height when not drawing (pen up)') }}</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- Controller Button Map -->
+	<h4>{{ _('Controller Button Map') }}</h4>
+	<div class="control-group">
+		<div class="controls">
+			<table class="table table-striped table-bordered table-hover">
+				<thead>
+					<tr>
+						<th class="span3">{{ _('Control') }}</th>
+						<th>{{ _('Function') }}</th>
+					</tr>
+				</thead>
+				<tbody>
+					<tr>
+						<td><strong>{{ _('Left Stick') }}</strong></td>
+						<td>{{ _('X-Axis Movement') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Right Stick') }}</strong></td>
+						<td>{{ _('Y-Axis Movement') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('A Button') }}</strong></td>
+						<td>{{ _('Toggle Drawing Mode (Pen Up/Down)') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('B Button') }}</strong></td>
+						<td>{{ _('Return to Home Position') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Y Button') }}</strong></td>
+						<td>{{ _('Clear Drawing (Shake)') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Left Trigger') }}</strong></td>
+						<td>{{ _('Decrease Movement Speed') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Right Trigger') }}</strong></td>
+						<td>{{ _('Increase Movement Speed') }}</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+	</div>
+</div>

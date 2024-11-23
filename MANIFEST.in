@@ -1,0 +1,4 @@
+include README.md
+recursive-include octoprint_plasticpilot/templates *
+recursive-include octoprint_plasticpilot/translations *
+recursive-include octoprint_plasticpilot/static *
