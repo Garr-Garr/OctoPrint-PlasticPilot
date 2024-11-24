@@ -14,6 +14,157 @@ import time
 import logging
 import json
 
+class MovementCoordinator:
+	"""
+	Coordinates movement commands between UserController input and printer output.
+	Integrates with existing PlasticPilot architecture.
+	"""
+	def __init__(self, plugin):
+		self._plugin = plugin
+		self._logger = plugin._logger
+		self._printer = plugin._printer
+		
+		# Movement state
+		self.target_x = 0.0
+		self.target_y = 0.0
+		self.target_e = 0.0
+		self.current_e = 0.0
+		self.last_movement_time = time.time()
+		self.movement_queue = []
+		
+		# Configuration
+		self.chunk_size = 0.5  # mm per movement chunk
+		self.min_chunk = 0.1   # minimum chunk size
+		self.update_interval = 0.04  # 40ms between updates
+		
+		# Locks
+		self._movement_lock = Lock()
+	
+	def update_settings(self, settings):
+		"""Update movement parameters from settings"""
+		min_movement = float(settings.get(["min_movement"]))
+		# Scale chunk size based on minimum movement setting
+		self.chunk_size = min(0.5, max(0.1, min_movement * 10))
+		self.min_chunk = min_movement
+		
+		# Update timing from settings
+		self.update_interval = float(settings.get(["movement_check_interval"])) / 1000.0
+	
+	def should_update(self):
+		"""Check if enough time has passed for next movement update"""
+		current_time = time.time()
+		if current_time - self.last_movement_time >= self.update_interval:
+			self.last_movement_time = current_time
+			return True
+		return False
+	
+	def process_movement(self, movement_data, current_speed, time_delta):
+		"""
+		Process movement data from UserController and generate coordinated movement
+		Returns True if movement was processed, False otherwise
+		"""
+		if current_speed <= 0:
+			return False
+			
+		try:
+			with self._movement_lock:
+				# Calculate potential movements
+				x_movement = movement_data['x_speed'] * current_speed * time_delta / 60
+				y_movement = movement_data['y_speed'] * current_speed * time_delta / 60
+				
+				# Calculate new target positions
+				new_x = max(0, min(self._plugin.maxX, self._plugin.current_x + x_movement))
+				new_y = max(0, min(self._plugin.maxY, self._plugin.current_y + y_movement))
+				
+				# Check if movement is significant
+				x_delta = new_x - self._plugin.current_x
+				y_delta = new_y - self._plugin.current_y
+				
+				if abs(x_delta) < self.min_chunk and abs(y_delta) < self.min_chunk:
+					return False
+				
+				# Calculate movement chunks
+				chunks = self._calculate_chunks(
+					self._plugin.current_x, self._plugin.current_y,
+					new_x, new_y,
+					current_speed
+				)
+				
+				# Send movement chunks
+				for chunk in chunks:
+					self._send_chunk(chunk)
+					
+				# Update current position
+				self._plugin.current_x = new_x
+				self._plugin.current_y = new_y
+				
+				return True
+				
+		except Exception as e:
+			self._logger.error(f"Error processing movement: {str(e)}")
+			return False
+	
+	def _calculate_chunks(self, start_x, start_y, end_x, end_y, speed):
+		"""Break movement into smaller chunks"""
+		chunks = []
+		
+		# Calculate total distance
+		dx = end_x - start_x
+		dy = end_y - start_y
+		distance = math.sqrt(dx*dx + dy*dy)
+		
+		if distance <= self.chunk_size:
+			# Movement is small enough to be one chunk
+			chunks.append({
+				'x': end_x,
+				'y': end_y,
+				'speed': speed
+			})
+		else:
+			# Break into multiple chunks
+			num_chunks = math.ceil(distance / self.chunk_size)
+			for i in range(1, num_chunks + 1):
+				fraction = i / num_chunks
+				chunks.append({
+					'x': start_x + dx * fraction,
+					'y': start_y + dy * fraction,
+					'speed': speed
+				})
+		
+		return chunks
+	
+	def _send_chunk(self, chunk):
+		"""Send a movement chunk to the printer"""
+		try:
+			gcode = f'G1 X{chunk["x"]:.3f} Y{chunk["y"]:.3f} F{chunk["speed"]}'
+			self._printer.commands([gcode])
+			# Use very small delay between chunks
+			time.sleep(0.001)
+		except Exception as e:
+			self._logger.error(f"Error sending movement chunk: {str(e)}")
+	
+	def process_extrusion(self, amount, feedrate):
+		"""Handle extrusion with movement coordination"""
+		try:
+			with self._movement_lock:
+				self.current_e += amount
+				gcode = f'G1 E{self.current_e:.3f} F{feedrate}'
+				self._printer.commands([gcode])
+				return True
+		except Exception as e:
+			self._logger.error(f"Error processing extrusion: {str(e)}")
+			return False
+
+	def emergency_stop(self):
+		"""Emergency stop all movement"""
+		try:
+			with self._movement_lock:
+				self._printer.commands(['M410'])  # Emergency stop
+				# Reset targets to current position
+				self.target_x = self._plugin.current_x
+				self.target_y = self._plugin.current_y
+		except Exception as e:
+			self._logger.error(f"Error during emergency stop: {str(e)}")
 
 class UserController:
 	def __init__(self):
@@ -527,7 +678,7 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 
 
 	def threadAcceptInput(self):
-		"""Enhanced thread function with configurable movement processing"""
+		"""Enhanced thread function with coordinated movement processing"""
 		self._logger.info('Initializing controller mode' + 
 						(' (DEBUG MODE)' if self.joy.debug_mode else ''))
 		
@@ -548,6 +699,10 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		self.joy.max_speed_multiplier = self._thread_parameters['max_speed_multiplier']
 		self.joy.smoothing_factor = float(self._settings.get(["smoothing_factor"])) / 100.0
 		
+		# Initialize movement coordinator
+		movement_coordinator = MovementCoordinator(self)
+		movement_coordinator.update_settings(self._settings)
+		
 		# Speed settings for different movement states
 		base_speed = self._thread_parameters['base_speed']
 		speed_settings = {
@@ -556,10 +711,6 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			'running': base_speed * self._thread_parameters['run_speed_multiplier'],
 			'max_speed': base_speed * self._thread_parameters['max_speed_multiplier']
 		}
-		
-		# Initialize position tracking
-		last_x = self.current_x
-		last_y = self.current_y
 		
 		while not self._stop_event.is_set():
 			try:
@@ -582,102 +733,43 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 				error_count = 0  # Reset error count on successful read
 				current_time = time.time()
 				
-				# Process movement if enough time has passed
-				if current_time - last_movement_time >= self._thread_parameters['movement_check_interval']:
-					movement_data = self.joy.get_movement()
-					
-					# Calculate new positions based on speed and state
-					current_speed = speed_settings[movement_data['movement_state']]
-					if current_speed > 0:
-						# Calculate movement based on speed and time delta
-						time_delta = current_time - last_movement_time
-						
-						# Calculate potential new positions
-						x_movement = movement_data['x_speed'] * current_speed * time_delta / 60
-						y_movement = movement_data['y_speed'] * current_speed * time_delta / 60
-						
-						new_x = max(0, min(self.maxX, self.current_x + x_movement))
-						new_y = max(0, min(self.maxY, self.current_y + y_movement))
-						
-						# Only move if the change is significant enough
-						position_changed = False
-						
-						if abs(new_x - last_x) >= self._thread_parameters['min_movement']:
-							with self._position_lock:
-								self.current_x = new_x
-								position_changed = True
-								
-						if abs(new_y - last_y) >= self._thread_parameters['min_movement']:
-							with self._position_lock:
-								self.current_y = new_y
-								position_changed = True
-						
-						# Send movement command if position changed
-						if position_changed:
-							if self.joy.debug_mode:
-								self._logger.info(
-									f"Moving to X:{self.current_x:.2f} Y:{self.current_y:.2f} "
-									f"(State: {movement_data['movement_state']}, "
-									f"Speed: {current_speed:.1f} mm/min)"
-								)
-							
-							# Send movement with current speed
-							gcode = f'G1 X{self.current_x:.3f} Y{self.current_y:.3f} F{current_speed}'
-							self._printer.commands([gcode])
-							time.sleep(self._thread_parameters['command_delay'])
-							
-							# Update last positions
-							last_x = self.current_x
-							last_y = self.current_y
-					
+				# Get and process movement data
+				movement_data = self.joy.get_movement()
+				current_speed = speed_settings[movement_data['movement_state']]
+				
+				# Process movement if coordinator indicates it's time
+				if movement_coordinator.should_update():
+					time_delta = current_time - last_movement_time
+					if movement_coordinator.process_movement(movement_data, current_speed, time_delta):
+						if self.joy.debug_mode:
+							self._logger.info(
+								f"Moving to X:{self.current_x:.2f} Y:{self.current_y:.2f} "
+								f"(State: {movement_data['movement_state']}, "
+								f"Speed: {current_speed:.1f} mm/min)"
+							)
 					last_movement_time = current_time
 
-				# Handle extrusion based on triggers
-				if self.joy.right_trigger > 0.1:  # Small deadzone
-					with self._extrusion_lock:
-						# Convert current_e_feedrate from mm/s to mm/min for G-code
-						e_feedrate_mmmin = self.current_e_feedrate * 60
-						amount = float(self._settings.get(["extrusion_amount"]))
-						# Scale amount by trigger pressure
-						scaled_amount = amount * self.joy.right_trigger
-						gcode = f"G1 E{scaled_amount:.3f} F{e_feedrate_mmmin:.1f}"
-						self.send(gcode)
-						if self.joy.debug_mode:
-							self._logger.info(f"Extruding: {scaled_amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s")
-					time.sleep(self._thread_parameters['command_delay'])
+				# Handle extrusion with right trigger
+				if self.joy.right_trigger > 0.1:
+					e_feedrate_mmmin = self.current_e_feedrate * 60
+					amount = float(self._settings.get(["extrusion_amount"])) * self.joy.right_trigger
+					movement_coordinator.process_extrusion(amount, e_feedrate_mmmin)
+					if self.joy.debug_mode:
+						self._logger.info(f"Extruding: {amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s")
 
-				elif self.joy.left_trigger > 0.1:  # Small deadzone
-					with self._extrusion_lock:
-						retraction_speed = float(self._settings.get(["retraction_speed"]))
-						# Convert retraction speed from mm/s to mm/min for G-code
-						retraction_feedrate = retraction_speed * 60
-						amount = float(self._settings.get(["retraction_amount"]))
-						# Scale amount by trigger pressure
-						scaled_amount = -amount * self.joy.left_trigger
-						gcode = f"G1 E{scaled_amount:.3f} F{retraction_feedrate:.1f}"
-						self.send(gcode)
-						if self.joy.debug_mode:
-							self._logger.info(f"Retracting: {-scaled_amount:.3f}mm at {retraction_speed:.1f}mm/s")
-					time.sleep(self._thread_parameters['command_delay'])
+				# Handle retraction with left trigger
+				elif self.joy.left_trigger > 0.1:
+					retraction_speed = float(self._settings.get(["retraction_speed"]))
+					retraction_feedrate = retraction_speed * 60
+					amount = float(self._settings.get(["retraction_amount"])) * self.joy.left_trigger
+					movement_coordinator.process_extrusion(-amount, retraction_feedrate)
+					if self.joy.debug_mode:
+						self._logger.info(f"Retracting: {amount:.3f}mm at {retraction_speed:.1f}mm/s")
 
 				# Handle feedrate adjustments
-				if self.joy.right_button:
-					increment = float(self._settings.get(["feedrate_increment"]))
-					max_feedrate = float(self._settings.get(["max_feedrate"]))
-					self.current_e_feedrate = min(self.current_e_feedrate + increment, max_feedrate)
-					if self.joy.debug_mode:
-						self._logger.info(f"Increased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
-					time.sleep(0.1)  # Debounce
-
-				elif self.joy.left_button:
-					increment = float(self._settings.get(["feedrate_increment"]))
-					min_feedrate = float(self._settings.get(["min_feedrate"]))
-					self.current_e_feedrate = max(self.current_e_feedrate - increment, min_feedrate)
-					if self.joy.debug_mode:
-						self._logger.info(f"Decreased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
-					time.sleep(0.1)  # Debounce
+				self.handle_feedrate()
 				
-				# Process other button actions with configurable debounce
+				# Process button actions
 				if self.joy.a_pressed:
 					self.drawing = not self.drawing
 					z_height = self.z_drawing if self.drawing else self.z_travel
@@ -691,15 +783,15 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 					self.send("G28 X Y")
 					self.current_x = 0.0
 					self.current_y = 0.0
-					last_x = 0.0
-					last_y = 0.0
+					movement_coordinator.target_x = 0.0
+					movement_coordinator.target_y = 0.0
 					time.sleep(0.1)  # Debounce
 				
 				if self.joy.y_pressed:
 					self._logger.info("Initiating shake clear")
 					self.shake_clear()
-					last_x = 0.0
-					last_y = 0.0
+					movement_coordinator.target_x = 0.0
+					movement_coordinator.target_y = 0.0
 					time.sleep(0.1)  # Debounce
 				
 				# Small sleep to prevent CPU thrashing
