@@ -787,12 +787,12 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 					movement_coordinator.target_y = 0.0
 					time.sleep(0.1)  # Debounce
 				
-				if self.joy.y_pressed:
-					self._logger.info("Initiating shake clear")
-					self.shake_clear()
-					movement_coordinator.target_x = 0.0
-					movement_coordinator.target_y = 0.0
-					time.sleep(0.1)  # Debounce
+				# if self.joy.y_pressed:
+				# 	self._logger.info("Initiating shake clear")
+				# 	self.shake_clear()
+				# 	movement_coordinator.target_x = 0.0
+				# 	movement_coordinator.target_y = 0.0
+				# 	time.sleep(0.1)  # Debounce
 				
 				# Small sleep to prevent CPU thrashing
 				threading.Event().wait(0.005)
@@ -858,26 +858,25 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self._logger.exception("Detailed error information:")
 			return []
 
-	def shake_clear(self):
-		"""Simulate the etch-a-sketch shake clear motion"""
-		# Lift the pen
-		self.drawing = False
-		self.send(f'G1 Z{self.z_travel} F1000')
+	# def shake_clear(self):
+	# 	# Lift the pen
+	# 	self.drawing = False
+	# 	self.send(f'G1 Z{self.z_travel} F1000')
 
-		# Perform rapid zigzag motion
-		for i in range(4):
-			self.send(f'G1 X{5} Y{5} F3000')
-			self.send(f'G1 X{self.maxX-5} Y{self.maxY-5} F3000')
-			self.send(f'G1 X{self.maxX-5} Y{5} F3000')
-			self.send(f'G1 X{5} Y{self.maxY-5} F3000')
+	# 	# Perform rapid zigzag motion
+	# 	for i in range(4):
+	# 		self.send(f'G1 X{5} Y{5} F3000')
+	# 		self.send(f'G1 X{self.maxX-5} Y{self.maxY-5} F3000')
+	# 		self.send(f'G1 X{self.maxX-5} Y{5} F3000')
+	# 		self.send(f'G1 X{5} Y{self.maxY-5} F3000')
 
-		# Return to starting position
-		self.current_x = 0
-		self.current_y = 0
-		self.send('G28 X Y')
+	# 	# Return to starting position
+	# 	self.current_x = 0
+	# 	self.current_y = 0
+	# 	self.send('G28 X Y')
 
 	def on_after_startup(self):
-		self._logger.info("Etch-A-Sketch Controller starting up")
+		self._logger.info("Controller starting up")
 		self._logger.info(f"Available routes: {app.url_map}")
 		self.update_printer_dimensions()
 
