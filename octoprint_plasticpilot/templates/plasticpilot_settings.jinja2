@@ -37,25 +37,25 @@
 	</div>
 
 	<!-- Debug Settings -->
-	<h4>{{ _('Debug Settings') }}</h4>
+	<h4>{{ _('Controller Debug') }}</h4>
 	<div class="control-group">
 		<label class="control-label">{{ _('Debug Mode') }}</label>
 		<div class="controls">
 			<label class="checkbox">
-				<input type="checkbox" data-bind="checked: settings.debug_mode">
+				<input type="checkbox" data-bind="checked: debugMode">
 				{{ _('Enable detailed input logging') }}
 			</label>
-			<span class="help-block">{{ _('When enabled, all controller inputs will be logged to OctoPrints log file') }}</span>
+			<span class="help-block">{{ _('When enabled, all controller inputs will be logged to OctoPrints log file, but the printer wont move') }}</span>
 		</div>
 	</div>
 
 	<!-- Movement Settings -->
-	<h4>{{ _('Movement Settings') }}</h4>
+	<h3>{{ _('Movement Settings') }}</h3>
 	<div class="control-group">
 		<label class="control-label">{{ _('Base Speed') }}</label>
 		<div class="controls">
 			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: settings.base_speed"
+				<input type="number" class="input-mini" data-bind="value: baseSpeed"
 					   min="100" max="6000" step="100">
 				<span class="add-on">mm/min</span>
 			</div>
@@ -71,7 +71,7 @@
 				<div class="span6">
 					<label class="inline">{{ _('Drawing Height:') }}</label>
 					<div class="input-append">
-						<input type="number" class="input-mini" data-bind="value: settings.z_drawing"
+						<input type="number" class="input-mini" data-bind="value: zDrawing"
 							   min="0" max="10" step="0.1">
 						<span class="add-on">mm</span>
 					</div>
@@ -80,13 +80,159 @@
 				<div class="span6">
 					<label class="inline">{{ _('Travel Height:') }}</label>
 					<div class="input-append">
-						<input type="number" class="input-mini" data-bind="value: settings.z_travel"
+						<input type="number" class="input-mini" data-bind="value: zTravel"
 							   min="0" max="10" step="0.1">
 						<span class="add-on">mm</span>
 					</div>
 					<span class="help-block">{{ _('Z height when not drawing (pen up)') }}</span>
 				</div>
 			</div>
+		</div>
+	</div>
+
+	<h3>{{ _('Responsiveness Settings') }}</h3>
+	<!-- Movement Check Interval -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Movement Check Interval') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: movementCheckInterval"
+					   min="10" max="100" step="5">
+				<span class="add-on">ms</span>
+			</div>
+			<span class="help-block">
+				{{ _('How often to check for controller movement 10-100ms. Lower values increase responsiveness but may impact performance.') }}
+			</span>
+		</div>
+	</div>
+
+	<!-- Command Delay -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Command Delay') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: commandDelay"
+					   min="10" max="100" step="5">
+				<span class="add-on">ms</span>
+			</div>
+			<span class="help-block">
+				{{ _('Delay between G-code commands 10-100ms. Lower values increase responsiveness but may overwhelm the printer.') }}
+			</span>
+		</div>
+	</div>
+
+	<!-- Movement Smoothing -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Movement Smoothing') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: smoothingFactor"
+					   min="0" max="100" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">
+				{{ _('Smoothing factor for movement 0-100%%. Higher values create smoother movement but increase input lag.') }}
+			</span>
+		</div>
+	</div>
+
+	<!-- Minimum Movement -->
+	<div class="control-group">
+		<label class="control-label">{{ _('Minimum Movement') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: minMovement"
+					   min="0.01" max="0.1" step="0.005">
+				<span class="add-on">mm</span>
+			</div>
+			<span class="help-block">
+				{{ _('Minimum movement distance 0.01-0.1mm. Lower values increase precision but may cause jittery movement.') }}
+			</span>
+		</div>
+	</div>
+
+	<!-- Speed Threshold Settings -->
+	<h3>{{ _('Speed Threshold Settings') }}</h3>
+	<div class="control-group">
+		<label class="control-label">{{ _('Deadzone Threshold') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: deadzoneThreshold"
+					   min="5" max="20" step="1">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Minimum joystick movement required 5-20%%. Higher values prevent drift but reduce precision.') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Walking Speed Threshold') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: walkThreshold"
+					   min="20" max="60" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Joystick position where walking speed begins 20-60%%. Movement below this uses precision speed.') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Running Speed Threshold') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: runThreshold"
+					   min="60" max="90" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Joystick position where running speed begins 60-90%%. Movement above this uses maximum speed.') }}</span>
+		</div>
+	</div>
+
+	<!-- Speed Multiplier Settings -->
+	<h3>{{ _('Speed Multiplier Settings') }}</h3>
+	<div class="control-group">
+		<label class="control-label">{{ _('Walking Speed Multiplier') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: walkSpeedMultiplier"
+					   min="10" max="40" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Speed multiplier for walking mode 10-40%% of base speed. For precise movements.') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Running Speed Multiplier') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: runSpeedMultiplier"
+					   min="40" max="80" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Speed multiplier for running mode 40-80%% of base speed. For medium-speed movements.') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Maximum Speed Multiplier') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: maxSpeedMultiplier"
+					   min="80" max="100" step="5">
+				<span class="add-on">%</span>
+			</div>
+			<span class="help-block">{{ _('Speed multiplier for maximum speed mode 80-100%% of base speed. For rapid movements.') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<div class="controls">
+			<button class="btn btn-warning" data-bind="click: resetSettings">
+				{{ _('Reset All Settings to Default') }}
+			</button>
+			<span class="help-block">{{ _('Warning: This will reset all settings to their default values.') }}</span>
 		</div>
 	</div>
 
