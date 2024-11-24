@@ -151,6 +151,92 @@
 		</div>
 	</div>
 
+	<h3>{{ _('Extrusion Settings') }}</h3>
+	<div class="control-group">
+		<label class="control-label">{{ _('Extrusion Speed') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: extrusionSpeed"
+					min="0.5" max="10" step="0.5">
+				<span class="add-on">mm/s</span>
+			</div>
+			<span class="help-block">{{ _('Default speed for filament extrusion (typically 1-5 mm/s)') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Retraction Speed') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: retractionSpeed"
+					min="10" max="50" step="1">
+				<span class="add-on">mm/s</span>
+			</div>
+			<span class="help-block">{{ _('Speed for filament retraction (typically 20-30 mm/s)') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Extrusion Amount') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: extrusionAmount"
+					min="0.1" max="5" step="0.1">
+				<span class="add-on">mm</span>
+			</div>
+			<span class="help-block">{{ _('Amount of filament to extrude per trigger press (scaled by trigger pressure)') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Retraction Amount') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: retractionAmount"
+					min="0.1" max="5" step="0.1">
+				<span class="add-on">mm</span>
+			</div>
+			<span class="help-block">{{ _('Amount of filament to retract per trigger press (scaled by trigger pressure)') }}</span>
+		</div>
+	</div>
+
+	<h3>{{ _('Extruder Feedrate Settings') }}</h3>
+	<div class="control-group">
+		<label class="control-label">{{ _('Feedrate Increment') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: feedrateIncrement"
+					min="0.1" max="2" step="0.1">
+				<span class="add-on">mm/s</span>
+			</div>
+			<span class="help-block">{{ _('Amount to change extruder feedrate per button press') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Minimum Feedrate') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: minFeedrate"
+					min="0.5" max="2" step="0.1">
+				<span class="add-on">mm/s</span>
+			</div>
+			<span class="help-block">{{ _('Minimum allowed extruder feedrate') }}</span>
+		</div>
+	</div>
+
+	<div class="control-group">
+		<label class="control-label">{{ _('Maximum Feedrate') }}</label>
+		<div class="controls">
+			<div class="input-append">
+				<input type="number" class="input-mini" data-bind="value: maxFeedrate"
+					min="2" max="15" step="0.5">
+				<span class="add-on">mm/s</span>
+			</div>
+			<span class="help-block">{{ _('Maximum allowed extruder feedrate') }}</span>
+		</div>
+	</div>
+
 	<!-- Speed Threshold Settings -->
 	<h3>{{ _('Speed Threshold Settings') }}</h3>
 	<div class="control-group">
@@ -255,6 +341,22 @@
 					<tr>
 						<td><strong>{{ _('Right Stick') }}</strong></td>
 						<td>{{ _('Y-Axis Movement') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Right Trigger') }}</strong></td>
+						<td>{{ _('Extrude Filament (pressure sensitive)') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Left Trigger') }}</strong></td>
+						<td>{{ _('Retract Filament (pressure sensitive)') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Right Button') }}</strong></td>
+						<td>{{ _('Increase Feedrate') }}</td>
+					</tr>
+					<tr>
+						<td><strong>{{ _('Left Button') }}</strong></td>
+						<td>{{ _('Decrease Feedrate') }}</td>
 					</tr>
 					<tr>
 						<td><strong>{{ _('A Button') }}</strong></td>

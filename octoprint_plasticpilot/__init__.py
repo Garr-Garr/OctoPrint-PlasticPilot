@@ -32,6 +32,12 @@ class UserController:
 		self.run_speed_multiplier = 0.6    # Medium speed for controlled movement
 		self.max_speed_multiplier = 1.0    # Full speed
 	
+		# Button states
+		self.right_trigger = 0.0
+		self.left_trigger = 0.0
+		self.right_button = False
+		self.left_button = False
+		
 		# Movement smoothing
 		self.smoothing_factor = 0.2    # Increased smoothing for more fluid movement
 		self.last_x_speed = 0.0
@@ -45,6 +51,8 @@ class UserController:
 		self.right_y = 0.0
 		self.left_trigger = 0.0
 		self.right_trigger = 0.0
+		self.right_trigger = 0.0
+		self.left_trigger = 0.0
 		
 		# Movement state tracking
 		self.current_movement_state = "idle"  # idle, walking, running, max_speed
@@ -56,6 +64,8 @@ class UserController:
 		self.b_pressed = False
 		self.x_pressed = False
 		self.y_pressed = False
+		self.right_button = False
+		self.left_button = False
 
 	def read(self):
 		"""
@@ -147,7 +157,10 @@ class UserController:
 				elif event.code == "ABS_RY":  # Right stick Y axis only
 					self.right_y = event.state
 					self.has_new_movement = True
-				# Ignore other axes (ABS_Y and ABS_RX)
+				elif event.code == "ABS_Z":  # Left trigger
+					self.left_trigger = event.state / 255.0  # Normalize to 0-1
+				elif event.code == "ABS_RZ":  # Right trigger
+					self.right_trigger = event.state / 255.0  # Normalize to 0-1
 					
 			elif event.ev_type == "Key":
 				if event.code == "BTN_SOUTH":    # A button
@@ -158,6 +171,10 @@ class UserController:
 					self.x_pressed = event.state == 1
 				elif event.code == "BTN_NORTH":  # Y button
 					self.y_pressed = event.state == 1
+				elif event.code == "BTN_TL":     # Left button
+					self.left_button = event.state == 1
+				elif event.code == "BTN_TR":     # Right button
+					self.right_button = event.state == 1
 					
 			return True
 			
@@ -232,6 +249,9 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		self._position_lock = Lock()  # For protecting position updates
 		self._state_lock = Lock()     # For protecting state variables
 		self._stop_event = Event()    # For clean thread shutdown
+  
+		self._extrusion_lock = Lock()  # For protecting extrusion operations
+		self.current_e_feedrate = 2.0  # Default extruder feedrate in mm/s
 
 		# Add logger
 		self._logger = logging.getLogger("octoprint.plugins.plasticpilot")
@@ -425,6 +445,85 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self._printer.commands([gcode])
 		except Exception as e:
 			self._logger.error(f"Error sending movement command: {str(e)}")
+   
+	def handle_extrusion(self):
+		"""Handle extrusion based on trigger states"""
+		if not self.joy:
+			return
+
+		try:
+			with self._extrusion_lock:
+				# Track cumulative extrusion amount
+				if not hasattr(self, 'current_e_position'):
+					self.current_e_position = 0.0
+
+				# Handle extrusion with right trigger
+				if self.joy.right_trigger > 0.1:  # Small deadzone
+					# Set absolute extrusion mode
+					self.send("M82")  # Switch to absolute E movements
+					
+					# Convert current_e_feedrate from mm/s to mm/min for G-code
+					e_feedrate_mmmin = self.current_e_feedrate * 60
+					amount = float(self._settings.get(["extrusion_amount"]))
+					# Scale amount by trigger pressure
+					scaled_amount = amount * self.joy.right_trigger
+					# Add to current position
+					self.current_e_position += scaled_amount
+					
+					gcode = f"G1 E{self.current_e_position:.3f} F{e_feedrate_mmmin:.1f}"
+					self.send(gcode)
+					if self.joy.debug_mode:
+						self._logger.info(f"Extruding: {scaled_amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s (Total: {self.current_e_position:.3f}mm)")
+
+				# Handle retraction with left trigger
+				elif self.joy.left_trigger > 0.1:  # Small deadzone
+					# Set absolute extrusion mode
+					self.send("M82")  # Switch to absolute E movements
+					
+					retraction_speed = float(self._settings.get(["retraction_speed"]))
+					# Convert retraction speed from mm/s to mm/min for G-code
+					retraction_feedrate = retraction_speed * 60
+					amount = float(self._settings.get(["retraction_amount"]))
+					# Scale amount by trigger pressure
+					scaled_amount = amount * self.joy.left_trigger
+					# Subtract from current position
+					self.current_e_position -= scaled_amount
+					
+					gcode = f"G1 E{self.current_e_position:.3f} F{retraction_feedrate:.1f}"
+					self.send(gcode)
+					if self.joy.debug_mode:
+						self._logger.info(f"Retracting: {scaled_amount:.3f}mm at {retraction_speed:.1f}mm/s (Total: {self.current_e_position:.3f}mm)")
+
+		except Exception as e:
+			self._logger.error(f"Error during extrusion handling: {str(e)}")
+
+
+	def handle_feedrate(self):
+		"""Handle extruder feedrate adjustments based on button states"""
+		if not self.joy:
+			return
+
+		try:
+			increment = float(self._settings.get(["feedrate_increment"]))
+			min_feedrate = float(self._settings.get(["min_feedrate"]))
+			max_feedrate = float(self._settings.get(["max_feedrate"]))
+
+			if self.joy.right_button:
+				# Increase feedrate
+				self.current_e_feedrate = min(self.current_e_feedrate + increment, max_feedrate)
+				if self.joy.debug_mode:
+					self._logger.info(f"Increased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
+				time.sleep(0.1)  # Debounce
+
+			elif self.joy.left_button:
+				# Decrease feedrate
+				self.current_e_feedrate = max(self.current_e_feedrate - increment, min_feedrate)
+				if self.joy.debug_mode:
+					self._logger.info(f"Decreased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
+				time.sleep(0.1)  # Debounce
+
+		except Exception as e:
+			self._logger.error(f"Error during feedrate handling: {str(e)}")
 
 
 	def threadAcceptInput(self):
@@ -532,8 +631,53 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 							last_y = self.current_y
 					
 					last_movement_time = current_time
+
+				# Handle extrusion based on triggers
+				if self.joy.right_trigger > 0.1:  # Small deadzone
+					with self._extrusion_lock:
+						# Convert current_e_feedrate from mm/s to mm/min for G-code
+						e_feedrate_mmmin = self.current_e_feedrate * 60
+						amount = float(self._settings.get(["extrusion_amount"]))
+						# Scale amount by trigger pressure
+						scaled_amount = amount * self.joy.right_trigger
+						gcode = f"G1 E{scaled_amount:.3f} F{e_feedrate_mmmin:.1f}"
+						self.send(gcode)
+						if self.joy.debug_mode:
+							self._logger.info(f"Extruding: {scaled_amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s")
+					time.sleep(self._thread_parameters['command_delay'])
+
+				elif self.joy.left_trigger > 0.1:  # Small deadzone
+					with self._extrusion_lock:
+						retraction_speed = float(self._settings.get(["retraction_speed"]))
+						# Convert retraction speed from mm/s to mm/min for G-code
+						retraction_feedrate = retraction_speed * 60
+						amount = float(self._settings.get(["retraction_amount"]))
+						# Scale amount by trigger pressure
+						scaled_amount = -amount * self.joy.left_trigger
+						gcode = f"G1 E{scaled_amount:.3f} F{retraction_feedrate:.1f}"
+						self.send(gcode)
+						if self.joy.debug_mode:
+							self._logger.info(f"Retracting: {-scaled_amount:.3f}mm at {retraction_speed:.1f}mm/s")
+					time.sleep(self._thread_parameters['command_delay'])
+
+				# Handle feedrate adjustments
+				if self.joy.right_button:
+					increment = float(self._settings.get(["feedrate_increment"]))
+					max_feedrate = float(self._settings.get(["max_feedrate"]))
+					self.current_e_feedrate = min(self.current_e_feedrate + increment, max_feedrate)
+					if self.joy.debug_mode:
+						self._logger.info(f"Increased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
+					time.sleep(0.1)  # Debounce
+
+				elif self.joy.left_button:
+					increment = float(self._settings.get(["feedrate_increment"]))
+					min_feedrate = float(self._settings.get(["min_feedrate"]))
+					self.current_e_feedrate = max(self.current_e_feedrate - increment, min_feedrate)
+					if self.joy.debug_mode:
+						self._logger.info(f"Decreased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
+					time.sleep(0.1)  # Debounce
 				
-				# Process button actions with configurable debounce
+				# Process other button actions with configurable debounce
 				if self.joy.a_pressed:
 					self.drawing = not self.drawing
 					z_height = self.z_drawing if self.drawing else self.z_travel
@@ -664,7 +808,16 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			run_threshold=75,			# percentage
 			walk_speed_multiplier=20,	# percentage
 			run_speed_multiplier=60,	# percentage
-			max_speed_multiplier=100	# percentage
+			max_speed_multiplier=100,	# percentage
+			# Extrusion settings
+			extrusion_speed=2.0,        # mm/s for extrusion
+			retraction_speed=25.0,      # mm/s for retraction
+			extrusion_amount=1.0,       # mm per trigger press
+			retraction_amount=1.0,      # mm per trigger press
+			# Feedrate settings
+			feedrate_increment=100,     # mm/min per button press
+			min_feedrate=0.5,           # mm/s minimum feedrate (30 mm/min)
+			max_feedrate=15.0,          # mm/s maximum feedrate (500 mm/min)
 		)
 
 	def on_settings_save(self, data):
