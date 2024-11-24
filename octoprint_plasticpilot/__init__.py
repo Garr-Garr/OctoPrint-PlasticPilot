@@ -886,7 +886,7 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			max_y=200.0,
 			z_drawing=0.1,
 			z_travel=1.0,
-			base_speed=1000,
+			base_speed=3000,
 			debug_mode=False,
 			# Responsiveness settings
 			movement_check_interval=25,	# 25ms
@@ -897,13 +897,13 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			deadzone_threshold=10,		# percentage
 			walk_threshold=40,			# percentage
 			run_threshold=75,			# percentage
-			walk_speed_multiplier=20,	# percentage
-			run_speed_multiplier=60,	# percentage
+			walk_speed_multiplier=40,	# percentage
+			run_speed_multiplier=80,	# percentage
 			max_speed_multiplier=100,	# percentage
 			# Extrusion settings
-			extrusion_speed=2.0,        # mm/s for extrusion
+			extrusion_speed=5.0,        # mm/s for extrusion
 			retraction_speed=25.0,      # mm/s for retraction
-			extrusion_amount=1.0,       # mm per trigger press
+			extrusion_amount=0.2,       # mm per trigger press
 			retraction_amount=1.0,      # mm per trigger press
 			# Feedrate settings
 			feedrate_increment=100,     # mm/min per button press
