@@ -1,318 +1,338 @@
-<div class="row-fluid">
-	<h3>{{ _('Plastic Pilot Settings') }}</h3>
-
-	<!-- Controller Selection -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Controller Device') }}</label>
-		<div class="controls">
-			<select data-bind="options: availableControllers,
-							 optionsText: 'name',
-							 optionsValue: 'id',
-							 value: selectedController">
-			</select>
-			<button class="btn" data-bind="click: refreshControllers">
-				{{ _('Refresh') }}
-			</button>
+<div class="row-fluid plastic-pilot-settings">
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#controller-settings">
+				<h3>{{ _('Controller Settings') }}</h3>
+			</a>
 		</div>
-	</div>
-
-	<!-- Controller Status -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Controller Status') }}</label>
-		<div class="controls">
-			<div class="btn-group">
-				<button class="btn" data-bind="click: activateController,
-											 enable: !isControllerActive() && selectedController(),
-											 css: { 'btn-success': !isControllerActive() }">
-					{{ _('Activate') }}
-				</button>
-				<button class="btn" data-bind="click: deactivateController,
-											 enable: isControllerActive,
-											 css: { 'btn-danger': isControllerActive }">
-					{{ _('Deactivate') }}
-				</button>
-			</div>
-			<span class="help-inline" data-bind="text: controllerStatusText"></span>
-		</div>
-	</div>
-
-	<!-- Debug Settings -->
-	<h4>{{ _('Controller Debug') }}</h4>
-	<div class="control-group">
-		<label class="control-label">{{ _('Debug Mode') }}</label>
-		<div class="controls">
-			<label class="checkbox">
-				<input type="checkbox" data-bind="checked: debugMode">
-				{{ _('Enable detailed input logging') }}
-			</label>
-			<span class="help-block">{{ _('When enabled, all controller inputs will be logged to OctoPrints log file, but the printer wont move') }}</span>
-		</div>
-	</div>
-
-	<!-- Movement Settings -->
-	<h3>{{ _('Movement Settings') }}</h3>
-	<div class="control-group">
-		<label class="control-label">{{ _('Base Speed') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: baseSpeed"
-					   min="100" max="6000" step="100">
-				<span class="add-on">mm/min</span>
-			</div>
-			<span class="help-block">{{ _('Base movement speed for the controller (100-6000 mm/min)') }}</span>
-		</div>
-	</div>
-
-	<!-- Z-Height Settings -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Z Heights') }}</label>
-		<div class="controls">
-			<div class="row-fluid">
-				<div class="span6">
-					<label class="inline">{{ _('Drawing Height:') }}</label>
-					<div class="input-append">
-						<input type="number" class="input-mini" data-bind="value: zDrawing"
-							   min="0" max="10" step="0.1">
-						<span class="add-on">mm</span>
+		<div id="controller-settings" class="accordion-body collapse in">
+			<div class="accordion-inner">
+				<!-- Controller Selection -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Controller Device') }}</label>
+					<div class="controls">
+						<select data-bind="options: availableControllers,
+										 optionsText: 'name',
+										 optionsValue: 'id',
+										 value: selectedController">
+						</select>
+						<button class="btn" data-bind="click: refreshControllers">
+							{{ _('Refresh') }}
+						</button>
 					</div>
-					<span class="help-block">{{ _('Z height when drawing (pen down)') }}</span>
 				</div>
-				<div class="span6">
-					<label class="inline">{{ _('Travel Height:') }}</label>
-					<div class="input-append">
-						<input type="number" class="input-mini" data-bind="value: zTravel"
-							   min="0" max="10" step="0.1">
-						<span class="add-on">mm</span>
+
+				<!-- Controller Status -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Controller Status') }}</label>
+					<div class="controls">
+						<div class="btn-group">
+							<button class="btn" data-bind="click: activateController,
+														 enable: !isControllerActive() && selectedController(),
+														 css: { 'btn-success': !isControllerActive() }">
+								{{ _('Activate') }}
+							</button>
+							<button class="btn" data-bind="click: deactivateController,
+														 enable: isControllerActive,
+														 css: { 'btn-danger': isControllerActive }">
+								{{ _('Deactivate') }}
+							</button>
+						</div>
+						<span class="help-inline" data-bind="text: controllerStatusText"></span>
 					</div>
-					<span class="help-block">{{ _('Z height when not drawing (pen up)') }}</span>
 				</div>
 			</div>
 		</div>
 	</div>
 
-	<h3>{{ _('Responsiveness Settings') }}</h3>
-	<!-- Movement Check Interval -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Movement Check Interval') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: movementCheckInterval"
-					   min="10" max="100" step="5">
-				<span class="add-on">ms</span>
+	<!-- Debug Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#debug-settings">
+				<h3>{{ _('Debug Settings') }}</h3>
+			</a>
+		</div>
+		<div id="debug-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<div class="control-group">
+					<label class="control-label">{{ _('Debug Mode') }}</label>
+					<div class="controls">
+						<label class="checkbox">
+							<input type="checkbox" data-bind="checked: debugMode">
+							{{ _('Enable detailed input logging') }}
+						</label>
+						<span class="help-block">{{ _('When enabled, all controller inputs will be logged to OctoPrints log file, but the printer wont move') }}</span>
+					</div>
+				</div>
 			</div>
-			<span class="help-block">
-				{{ _('How often to check for controller movement 10-100ms. Lower values increase responsiveness but may impact performance.') }}
-			</span>
 		</div>
 	</div>
 
-	<!-- Command Delay -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Command Delay') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: commandDelay"
-					   min="10" max="100" step="5">
-				<span class="add-on">ms</span>
+	<!-- Movement Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#movement-settings">
+				<h3>{{ _('Movement Settings') }}</h3>
+			</a>
+		</div>
+		<div id="movement-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<div class="control-group">
+					<label class="control-label">{{ _('Base Speed') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: baseSpeed"
+								   min="100" max="6000" step="100">
+							<span class="add-on">mm/min</span>
+						</div>
+						<span class="help-block">{{ _('Base movement speed for the controller (100-6000 mm/min)') }}</span>
+					</div>
+				</div>
+
+				<!-- Z-Height Settings -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Z Heights') }}</label>
+					<div class="controls">
+						<div class="row-fluid">
+							<div class="span6">
+								<label class="inline">{{ _('Drawing Height:') }}</label>
+								<div class="input-append">
+									<input type="number" class="input-mini" data-bind="value: zDrawing"
+										   min="0" max="10" step="0.1">
+									<span class="add-on">mm</span>
+								</div>
+								<span class="help-block">{{ _('Z height when drawing (pen down)') }}</span>
+							</div>
+							<div class="span6">
+								<label class="inline">{{ _('Travel Height:') }}</label>
+								<div class="input-append">
+									<input type="number" class="input-mini" data-bind="value: zTravel"
+										   min="0" max="10" step="0.1">
+									<span class="add-on">mm</span>
+								</div>
+								<span class="help-block">{{ _('Z height when not drawing (pen up)') }}</span>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
-			<span class="help-block">
-				{{ _('Delay between G-code commands 10-100ms. Lower values increase responsiveness but may overwhelm the printer.') }}
-			</span>
 		</div>
 	</div>
 
-	<!-- Movement Smoothing -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Movement Smoothing') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: smoothingFactor"
-					   min="0" max="100" step="5">
-				<span class="add-on">%</span>
+	<!-- Responsiveness Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#responsiveness-settings">
+				<h3>{{ _('Responsiveness Settings') }}</h3>
+			</a>
+		</div>
+		<div id="responsiveness-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<!-- Movement Check Interval -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Movement Check Interval') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: movementCheckInterval"
+								   min="10" max="100" step="5">
+							<span class="add-on">ms</span>
+						</div>
+						<span class="help-block">
+							{{ _('How often to check for controller movement 10-100ms. Lower values increase responsiveness but may impact performance.') }}
+						</span>
+					</div>
+				</div>
+
+				<!-- Command Delay -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Command Delay') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: commandDelay"
+								   min="10" max="100" step="5">
+							<span class="add-on">ms</span>
+						</div>
+						<span class="help-block">
+							{{ _('Delay between G-code commands 10-100ms. Lower values increase responsiveness but may overwhelm the printer.') }}
+						</span>
+					</div>
+				</div>
+
+				<!-- Movement Smoothing -->
+				<div class="control-group">
+					<label class="control-label">{{ _('Movement Smoothing') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: smoothingFactor"
+								   min="0" max="100" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">
+							{{ _('Smoothing factor for movement 0-100%%. Higher values create smoother movement but increase input lag.') }}
+						</span>
+					</div>
+				</div>
 			</div>
-			<span class="help-block">
-				{{ _('Smoothing factor for movement 0-100%%. Higher values create smoother movement but increase input lag.') }}
-			</span>
 		</div>
 	</div>
 
-	<!-- Minimum Movement -->
-	<div class="control-group">
-		<label class="control-label">{{ _('Minimum Movement') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: minMovement"
-					   min="0.01" max="0.1" step="0.005">
-				<span class="add-on">mm</span>
+	<!-- Extrusion Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#extrusion-settings">
+				<h3>{{ _('Extrusion Settings') }}</h3>
+			</a>
+		</div>
+		<div id="extrusion-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<div class="control-group">
+					<label class="control-label">{{ _('Extrusion Speed') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: extrusionSpeed"
+								min="0.5" max="10" step="0.5">
+							<span class="add-on">mm/s</span>
+						</div>
+						<span class="help-block">{{ _('Default speed for filament extrusion (typically 1-5 mm/s)') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Retraction Speed') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: retractionSpeed"
+								min="10" max="50" step="1">
+							<span class="add-on">mm/s</span>
+						</div>
+						<span class="help-block">{{ _('Speed for filament retraction (typically 20-30 mm/s)') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Extrusion Amount') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: extrusionAmount"
+								min="0.1" max="5" step="0.1">
+							<span class="add-on">mm</span>
+						</div>
+						<span class="help-block">{{ _('Amount of filament to extrude per trigger press (scaled by trigger pressure)') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Retraction Amount') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: retractionAmount"
+								min="0.1" max="5" step="0.1">
+							<span class="add-on">mm</span>
+						</div>
+						<span class="help-block">{{ _('Amount of filament to retract per trigger press (scaled by trigger pressure)') }}</span>
+					</div>
+				</div>
 			</div>
-			<span class="help-block">
-				{{ _('Minimum movement distance 0.01-0.1mm. Lower values increase precision but may cause jittery movement.') }}
-			</span>
 		</div>
 	</div>
 
-	<h3>{{ _('Extrusion Settings') }}</h3>
-	<div class="control-group">
-		<label class="control-label">{{ _('Extrusion Speed') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: extrusionSpeed"
-					min="0.5" max="10" step="0.5">
-				<span class="add-on">mm/s</span>
+	<!-- Speed Threshold Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#threshold-settings">
+				<h3>{{ _('Speed Threshold Settings') }}</h3>
+			</a>
+		</div>
+		<div id="threshold-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<div class="control-group">
+					<label class="control-label">{{ _('Deadzone Threshold') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: deadzoneThreshold"
+								   min="5" max="20" step="1">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Minimum joystick movement required 5-20%%. Higher values prevent drift but reduce precision.') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Walking Speed Threshold') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: walkThreshold"
+								   min="20" max="60" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Joystick position where walking speed begins 20-60%%. Movement below this uses precision speed.') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Running Speed Threshold') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: runThreshold"
+								   min="60" max="90" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Joystick position where running speed begins 60-90%%. Movement above this uses maximum speed.') }}</span>
+					</div>
+				</div>
 			</div>
-			<span class="help-block">{{ _('Default speed for filament extrusion (typically 1-5 mm/s)') }}</span>
+		</div>
+	</div>
+	
+	<!-- Speed Multiplier Settings Section -->
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#multiplier-settings">
+				<h3>{{ _('Speed Multiplier Settings') }}</h3>
+			</a>
+		</div>
+		<div id="multiplier-settings" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<div class="control-group">
+					<label class="control-label">{{ _('Walking Speed Multiplier') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: walkSpeedMultiplier"
+								   min="10" max="40" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Speed multiplier for walking mode 10-40%% of base speed. For precise movements.') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Running Speed Multiplier') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: runSpeedMultiplier"
+								   min="40" max="80" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Speed multiplier for running mode 40-80%% of base speed. For medium-speed movements.') }}</span>
+					</div>
+				</div>
+
+				<div class="control-group">
+					<label class="control-label">{{ _('Maximum Speed Multiplier') }}</label>
+					<div class="controls">
+						<div class="input-append">
+							<input type="number" class="input-mini" data-bind="value: maxSpeedMultiplier"
+								   min="80" max="100" step="5">
+							<span class="add-on">%</span>
+						</div>
+						<span class="help-block">{{ _('Speed multiplier for maximum speed mode 80-100%% of base speed. For rapid movements.') }}</span>
+					</div>
+				</div>
+			</div>
 		</div>
 	</div>
 
-	<div class="control-group">
-		<label class="control-label">{{ _('Retraction Speed') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: retractionSpeed"
-					min="10" max="50" step="1">
-				<span class="add-on">mm/s</span>
-			</div>
-			<span class="help-block">{{ _('Speed for filament retraction (typically 20-30 mm/s)') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Extrusion Amount') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: extrusionAmount"
-					min="0.1" max="5" step="0.1">
-				<span class="add-on">mm</span>
-			</div>
-			<span class="help-block">{{ _('Amount of filament to extrude per trigger press (scaled by trigger pressure)') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Retraction Amount') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: retractionAmount"
-					min="0.1" max="5" step="0.1">
-				<span class="add-on">mm</span>
-			</div>
-			<span class="help-block">{{ _('Amount of filament to retract per trigger press (scaled by trigger pressure)') }}</span>
-		</div>
-	</div>
-
-	<h3>{{ _('Extruder Feedrate Settings') }}</h3>
-	<div class="control-group">
-		<label class="control-label">{{ _('Feedrate Increment') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: feedrateIncrement"
-					min="0.1" max="2" step="0.1">
-				<span class="add-on">mm/s</span>
-			</div>
-			<span class="help-block">{{ _('Amount to change extruder feedrate per button press') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Minimum Feedrate') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: minFeedrate"
-					min="0.5" max="2" step="0.1">
-				<span class="add-on">mm/s</span>
-			</div>
-			<span class="help-block">{{ _('Minimum allowed extruder feedrate') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Maximum Feedrate') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: maxFeedrate"
-					min="2" max="15" step="0.5">
-				<span class="add-on">mm/s</span>
-			</div>
-			<span class="help-block">{{ _('Maximum allowed extruder feedrate') }}</span>
-		</div>
-	</div>
-
-	<!-- Speed Threshold Settings -->
-	<h3>{{ _('Speed Threshold Settings') }}</h3>
-	<div class="control-group">
-		<label class="control-label">{{ _('Deadzone Threshold') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: deadzoneThreshold"
-					   min="5" max="20" step="1">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Minimum joystick movement required 5-20%%. Higher values prevent drift but reduce precision.') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Walking Speed Threshold') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: walkThreshold"
-					   min="20" max="60" step="5">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Joystick position where walking speed begins 20-60%%. Movement below this uses precision speed.') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Running Speed Threshold') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: runThreshold"
-					   min="60" max="90" step="5">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Joystick position where running speed begins 60-90%%. Movement above this uses maximum speed.') }}</span>
-		</div>
-	</div>
-
-	<!-- Speed Multiplier Settings -->
-	<h3>{{ _('Speed Multiplier Settings') }}</h3>
-	<div class="control-group">
-		<label class="control-label">{{ _('Walking Speed Multiplier') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: walkSpeedMultiplier"
-					   min="10" max="40" step="5">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Speed multiplier for walking mode 10-40%% of base speed. For precise movements.') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Running Speed Multiplier') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: runSpeedMultiplier"
-					   min="40" max="80" step="5">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Speed multiplier for running mode 40-80%% of base speed. For medium-speed movements.') }}</span>
-		</div>
-	</div>
-
-	<div class="control-group">
-		<label class="control-label">{{ _('Maximum Speed Multiplier') }}</label>
-		<div class="controls">
-			<div class="input-append">
-				<input type="number" class="input-mini" data-bind="value: maxSpeedMultiplier"
-					   min="80" max="100" step="5">
-				<span class="add-on">%</span>
-			</div>
-			<span class="help-block">{{ _('Speed multiplier for maximum speed mode 80-100%% of base speed. For rapid movements.') }}</span>
-		</div>
-	</div>
-
+	<!-- Reset Settings Button -->
 	<div class="control-group">
 		<div class="controls">
 			<button class="btn btn-warning" data-bind="click: resetSettings">
@@ -323,63 +343,61 @@
 	</div>
 
 	<!-- Controller Button Map -->
-	<h4>{{ _('Controller Button Map') }}</h4>
-	<div class="control-group">
-		<div class="controls">
-			<table class="table table-striped table-bordered table-hover">
-				<thead>
-					<tr>
-						<th class="span3">{{ _('Control') }}</th>
-						<th>{{ _('Function') }}</th>
-					</tr>
-				</thead>
-				<tbody>
-					<tr>
-						<td><strong>{{ _('Left Stick') }}</strong></td>
-						<td>{{ _('X-Axis Movement') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Right Stick') }}</strong></td>
-						<td>{{ _('Y-Axis Movement') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Right Trigger') }}</strong></td>
-						<td>{{ _('Extrude Filament (pressure sensitive)') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Left Trigger') }}</strong></td>
-						<td>{{ _('Retract Filament (pressure sensitive)') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Right Button') }}</strong></td>
-						<td>{{ _('Increase Feedrate') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Left Button') }}</strong></td>
-						<td>{{ _('Decrease Feedrate') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('A Button') }}</strong></td>
-						<td>{{ _('Toggle Drawing Mode (Pen Up/Down)') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('B Button') }}</strong></td>
-						<td>{{ _('Return to Home Position') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Y Button') }}</strong></td>
-						<td>{{ _('Clear Drawing (Shake)') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Left Trigger') }}</strong></td>
-						<td>{{ _('Decrease Movement Speed') }}</td>
-					</tr>
-					<tr>
-						<td><strong>{{ _('Right Trigger') }}</strong></td>
-						<td>{{ _('Increase Movement Speed') }}</td>
-					</tr>
-				</tbody>
-			</table>
+	<div class="accordion-group">
+		<div class="accordion-heading">
+			<a class="accordion-toggle" data-toggle="collapse" href="#button-map">
+				<h3>{{ _('Controller Button Map') }}</h3>
+			</a>
+		</div>
+		<div id="button-map" class="accordion-body collapse">
+			<div class="accordion-inner">
+				<table class="table table-striped table-bordered table-hover">
+					<thead>
+						<tr>
+							<th class="span3">{{ _('Control') }}</th>
+							<th>{{ _('Function') }}</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td><strong>{{ _('Left Stick') }}</strong></td>
+							<td>{{ _('X-Axis Movement') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Right Stick') }}</strong></td>
+							<td>{{ _('Y-Axis Movement') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Right Trigger') }}</strong></td>
+							<td>{{ _('Extrude Filament (pressure sensitive)') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Left Trigger') }}</strong></td>
+							<td>{{ _('Retract Filament (pressure sensitive)') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Right Button') }}</strong></td>
+							<td>{{ _('Increase Feedrate') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Left Button') }}</strong></td>
+							<td>{{ _('Decrease Feedrate') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('A Button') }}</strong></td>
+							<td>{{ _('Toggle Drawing Mode (Pen Up/Down)') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('B Button') }}</strong></td>
+							<td>{{ _('Return to Home Position') }}</td>
+						</tr>
+						<tr>
+							<td><strong>{{ _('Y Button') }}</strong></td>
+							<td>{{ _('Clear Drawing (Shake)') }}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
 		</div>
 	</div>
 </div>
