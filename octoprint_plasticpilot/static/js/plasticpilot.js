@@ -51,14 +51,13 @@ $(function() {
 			return "No controller selected";
 		});
 
-		// Initialize all settings as observables
+		// Initialize all settings as observables - remove unused ones
 		self.baseSpeed = ko.observable();
 		self.zDrawing = ko.observable();
 		self.zTravel = ko.observable();
 		self.debugMode = ko.observable();
 		self.movementCheckInterval = ko.observable();
 		self.commandDelay = ko.observable();
-		self.smoothingFactor = ko.observable();
 		self.extrusionSpeed = ko.observable();
 		self.retractionSpeed = ko.observable();
 		self.extrusionAmount = ko.observable();
@@ -67,24 +66,16 @@ $(function() {
 		self.minFeedrate = ko.observable();
 		self.maxFeedrate = ko.observable();
 		self.minMovement = ko.observable();
-		self.deadzoneThreshold = ko.observable();
-		self.walkThreshold = ko.observable();
-		self.runThreshold = ko.observable();
-		self.walkSpeedMultiplier = ko.observable();
-		self.runSpeedMultiplier = ko.observable();
-		self.maxSpeedMultiplier = ko.observable();
 
-		// Initialize settings
+		// Update initialization - remove unused bindings
 		self.onBeforeBinding = function() {
 			self.settings = self.settingsViewModel.settings.plugins.plasticpilot;
-			// Bind all settings to their observables
 			self.baseSpeed(self.settings.base_speed());
 			self.zDrawing(self.settings.z_drawing());
 			self.zTravel(self.settings.z_travel());
 			self.debugMode(self.settings.debug_mode());
 			self.movementCheckInterval(self.settings.movement_check_interval());
 			self.commandDelay(self.settings.command_delay());
-			self.smoothingFactor(self.settings.smoothing_factor());
 			self.extrusionSpeed(self.settings.extrusion_speed());
 			self.retractionSpeed(self.settings.retraction_speed());
 			self.extrusionAmount(self.settings.extrusion_amount());
@@ -93,15 +84,9 @@ $(function() {
 			self.minFeedrate(self.settings.min_feedrate());
 			self.maxFeedrate(self.settings.max_feedrate());
 			self.minMovement(self.settings.min_movement());
-			self.deadzoneThreshold(self.settings.deadzone_threshold());
-			self.walkThreshold(self.settings.walk_threshold());
-			self.runThreshold(self.settings.run_threshold());
-			self.walkSpeedMultiplier(self.settings.walk_speed_multiplier());
-			self.runSpeedMultiplier(self.settings.run_speed_multiplier());
-			self.maxSpeedMultiplier(self.settings.max_speed_multiplier());
 		};
 
-		// Subscribe to changes and update settings
+		// Update settings save - remove unused settings
 		self.onSettingsBeforeSave = function() {
 			self.settings.base_speed(self.baseSpeed());
 			self.settings.z_drawing(self.zDrawing());
@@ -109,7 +94,6 @@ $(function() {
 			self.settings.debug_mode(self.debugMode());
 			self.settings.movement_check_interval(self.movementCheckInterval());
 			self.settings.command_delay(self.commandDelay());
-			self.settings.smoothing_factor(self.smoothingFactor());
 			self.settings.extrusion_speed(self.extrusionSpeed());
 			self.settings.retraction_speed(self.retractionSpeed());
 			self.settings.extrusion_amount(self.extrusionAmount());
@@ -118,12 +102,6 @@ $(function() {
 			self.settings.min_feedrate(self.minFeedrate());
 			self.settings.max_feedrate(self.maxFeedrate());
 			self.settings.min_movement(self.minMovement());
-			self.settings.deadzone_threshold(self.deadzoneThreshold());
-			self.settings.walk_threshold(self.walkThreshold());
-			self.settings.run_threshold(self.runThreshold());
-			self.settings.walk_speed_multiplier(self.walkSpeedMultiplier());
-			self.settings.run_speed_multiplier(self.runSpeedMultiplier());
-			self.settings.max_speed_multiplier(self.maxSpeedMultiplier());
 		};
 
 		// Periodic refresh functions
@@ -283,7 +261,7 @@ $(function() {
 								self.walkSpeedMultiplier(response.defaults.walk_speed_multiplier);
 								self.runSpeedMultiplier(response.defaults.run_speed_multiplier);
 								self.maxSpeedMultiplier(response.defaults.max_speed_multiplier);
-	
+
 								new PNotify({
 									title: "Settings Reset",
 									text: "All settings have been reset to their default values",

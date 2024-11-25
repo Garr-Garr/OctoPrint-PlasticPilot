@@ -4,7 +4,7 @@
 plugin_identifier =          "plasticpilot"
 plugin_package =             "octoprint_plasticpilot"
 plugin_name =                "OctoPrint-PlasticPilot"
-plugin_version =             "0.1.2"
+plugin_version =             "0.1.3"
 plugin_description =         """A plugin to control the 3D printer with a USB controller."""
 plugin_author =              "Garrett Broters"
 plugin_author_email =        "gbroters@gmail.com"

@@ -9,162 +9,280 @@ from time import sleep
 from threading import Thread, Lock, Event
 import threading
 from inputs import get_gamepad
+from collections import deque
+from dataclasses import dataclass
+from typing import List, Deque
+from queue import Queue
 import math
 import time
 import logging
 import json
 
-class MovementCoordinator:
-	"""
-	Coordinates movement commands between UserController input and printer output.
-	Integrates with existing PlasticPilot architecture.
-	"""
-	def __init__(self, plugin):
-		self._plugin = plugin
-		self._logger = plugin._logger
-		self._printer = plugin._printer
-		
-		# Movement state
-		self.target_x = 0.0
-		self.target_y = 0.0
-		self.target_e = 0.0
-		self.current_e = 0.0
-		self.last_movement_time = time.time()
-		self.movement_queue = []
-		
-		# Configuration
-		self.chunk_size = 0.5  # mm per movement chunk
-		self.min_chunk = 0.1   # minimum chunk size
-		self.update_interval = 0.04  # 40ms between updates
-		
-		# Locks
-		self._movement_lock = Lock()
-	
-	def update_settings(self, settings):
-		"""Update movement parameters from settings"""
-		min_movement = float(settings.get(["min_movement"]))
-		# Scale chunk size based on minimum movement setting
-		self.chunk_size = min(0.5, max(0.1, min_movement * 10))
-		self.min_chunk = min_movement
-		
-		# Update timing from settings
-		self.update_interval = float(settings.get(["movement_check_interval"])) / 1000.0
-	
-	def should_update(self):
-		"""Check if enough time has passed for next movement update"""
-		current_time = time.time()
-		if current_time - self.last_movement_time >= self.update_interval:
-			self.last_movement_time = current_time
-			return True
-		return False
-	
-	def process_movement(self, movement_data, current_speed, time_delta):
-		"""
-		Process movement data from UserController and generate coordinated movement
-		Returns True if movement was processed, False otherwise
-		"""
-		if current_speed <= 0:
-			return False
-			
-		try:
-			with self._movement_lock:
-				# Calculate potential movements
-				x_movement = movement_data['x_speed'] * current_speed * time_delta / 60
-				y_movement = movement_data['y_speed'] * current_speed * time_delta / 60
-				
-				# Calculate new target positions
-				new_x = max(0, min(self._plugin.maxX, self._plugin.current_x + x_movement))
-				new_y = max(0, min(self._plugin.maxY, self._plugin.current_y + y_movement))
-				
-				# Check if movement is significant
-				x_delta = new_x - self._plugin.current_x
-				y_delta = new_y - self._plugin.current_y
-				
-				if abs(x_delta) < self.min_chunk and abs(y_delta) < self.min_chunk:
-					return False
-				
-				# Calculate movement chunks
-				chunks = self._calculate_chunks(
-					self._plugin.current_x, self._plugin.current_y,
-					new_x, new_y,
-					current_speed
-				)
-				
-				# Send movement chunks
-				for chunk in chunks:
-					self._send_chunk(chunk)
-					
-				# Update current position
-				self._plugin.current_x = new_x
-				self._plugin.current_y = new_y
-				
-				return True
-				
-		except Exception as e:
-			self._logger.error(f"Error processing movement: {str(e)}")
-			return False
-	
-	def _calculate_chunks(self, start_x, start_y, end_x, end_y, speed):
-		"""Break movement into smaller chunks"""
-		chunks = []
-		
-		# Calculate total distance
-		dx = end_x - start_x
-		dy = end_y - start_y
-		distance = math.sqrt(dx*dx + dy*dy)
-		
-		if distance <= self.chunk_size:
-			# Movement is small enough to be one chunk
-			chunks.append({
-				'x': end_x,
-				'y': end_y,
-				'speed': speed
-			})
-		else:
-			# Break into multiple chunks
-			num_chunks = math.ceil(distance / self.chunk_size)
-			for i in range(1, num_chunks + 1):
-				fraction = i / num_chunks
-				chunks.append({
-					'x': start_x + dx * fraction,
-					'y': start_y + dy * fraction,
-					'speed': speed
-				})
-		
-		return chunks
-	
-	def _send_chunk(self, chunk):
-		"""Send a movement chunk to the printer"""
-		try:
-			gcode = f'G1 X{chunk["x"]:.3f} Y{chunk["y"]:.3f} F{chunk["speed"]}'
-			self._printer.commands([gcode])
-			# Use very small delay between chunks
-			time.sleep(0.001)
-		except Exception as e:
-			self._logger.error(f"Error sending movement chunk: {str(e)}")
-	
-	def process_extrusion(self, amount, feedrate):
-		"""Handle extrusion with movement coordination"""
-		try:
-			with self._movement_lock:
-				self.current_e += amount
-				gcode = f'G1 E{self.current_e:.3f} F{feedrate}'
-				self._printer.commands([gcode])
-				return True
-		except Exception as e:
-			self._logger.error(f"Error processing extrusion: {str(e)}")
-			return False
+@dataclass
+class ControllerState:
+	"""Represents a single controller state snapshot"""
+	x_axis: float = 0.0  # Left stick X
+	y_axis: float = 0.0  # Right stick Y
+	extrusion: float = 0.0  # Right trigger
+	retraction: float = 0.0  # Left trigger
+	timestamp: float = 0.0
 
-	def emergency_stop(self):
-		"""Emergency stop all movement"""
+@dataclass
+class MovementCommand:
+	"""Represents a consolidated movement command"""
+	x: float = 0.0
+	y: float = 0.0
+	e: float = 0.0
+	f: float = 0.0  # Feedrate
+
+class BufferedController:
+	"""Handles buffered input processing and movement coordination"""
+	def __init__(self, plugin, max_buffer_size=100):
+		self.plugin = plugin
+		self.logger = plugin._logger
+		self._input_buffer: Deque[ControllerState] = deque(maxlen=max_buffer_size)
+		self._command_queue: Queue[MovementCommand] = Queue()
+		self._movement_thread = None
+		self._input_thread = None
+		self._stop_event = threading.Event()
+
+		# Movement state
+		self.current_x = 0.0
+		self.current_y = 0.0
+		self.current_e = 0.0
+		self.last_extrude_position = None
+
+		# Threading control
+		self._buffer_lock = threading.Lock()
+		self._state_lock = threading.Lock()
+
+		# Movement parameters
+		self.min_movement = 0.01  # mm
+		self.max_extrusion_per_mm = 0.1  # mm of filament per mm of travel
+		self.input_poll_rate = 0.001  # 1ms
+		self.movement_update_rate = 0.1  # 100ms
+
+		# Initialize settings from plugin
+		self.update_settings(plugin._settings)
+
+	def update_settings(self, settings):
+		"""Update controller settings from plugin settings"""
+		with self._state_lock:
+			self.base_speed = float(settings.get(["base_speed"]))
+			self.min_movement = float(settings.get(["min_movement"]))
+			self.extrusion_speed = float(settings.get(["extrusion_speed"]))
+			self.retraction_speed = float(settings.get(["retraction_speed"]))
+			self.max_extrusion_per_mm = float(settings.get(["extrusion_amount"]))
+
+			# Update timing parameters
+			self.movement_update_rate = float(settings.get(["movement_check_interval"])) / 1000.0  # Convert to seconds
+
+			# Update debugging
+			if hasattr(self.plugin, 'joy') and self.plugin.joy:
+				self.plugin.joy.debug_mode = settings.get_boolean(["debug_mode"])
+
+	def start(self):
+		"""Start the input and movement processing threads"""
+		self._stop_event.clear()
+
+		# Start input polling thread
+		self._input_thread = threading.Thread(target=self._input_polling_loop)
+		self._input_thread.daemon = True
+		self._input_thread.start()
+
+		# Start movement processing thread
+		self._movement_thread = threading.Thread(target=self._movement_processing_loop)
+		self._movement_thread.daemon = True
+		self._movement_thread.start()
+
+		self.logger.info("Buffered controller system started")
+
+	def stop(self):
+		"""Stop all processing threads"""
+		self._stop_event.set()
+
+		if self._input_thread:
+			self._input_thread.join(timeout=1.0)
+		if self._movement_thread:
+			self._movement_thread.join(timeout=1.0)
+
+		self._input_buffer.clear()
+		while not self._command_queue.empty():
+			self._command_queue.get()
+
+		self.logger.info("Buffered controller system stopped")
+
+	def _input_polling_loop(self):
+		"""Rapidly poll controller input and add to buffer"""
+		last_poll_time = time.time()
+
+		while not self._stop_event.is_set():
+			current_time = time.time()
+			if current_time - last_poll_time >= self.input_poll_rate:
+				try:
+					if self.plugin.joy and self.plugin.joy.read():
+						# Handle button presses
+						self._handle_buttons()
+
+						with self._buffer_lock:
+							state = ControllerState(
+								x_axis=self.plugin.joy.left_x / self.plugin.joy.max_analog_val,
+								y_axis=-self.plugin.joy.right_y / self.plugin.joy.max_analog_val,  # Invert Y
+								extrusion=self.plugin.joy.right_trigger,
+								retraction=self.plugin.joy.left_trigger,
+								timestamp=current_time
+							)
+							self._input_buffer.append(state)
+					last_poll_time = current_time
+				except Exception as e:
+					self.logger.error(f"Error polling input: {str(e)}")
+
+			# Small sleep to prevent CPU thrashing
+			time.sleep(0.0005)  # 0.5ms sleep
+
+	def _movement_processing_loop(self):
+		"""Process buffered input and generate movement commands"""
+		last_process_time = time.time()
+
+		while not self._stop_event.is_set():
+			current_time = time.time()
+			if current_time - last_process_time >= self.movement_update_rate:
+				try:
+					self._process_buffered_input()
+					last_process_time = current_time
+				except Exception as e:
+					self.logger.error(f"Error processing movement: {str(e)}")
+
+			# Small sleep to prevent CPU thrashing
+			time.sleep(0.001)  # 1ms sleep
+
+	def _process_buffered_input(self):
+		"""Process accumulated input buffer into movement commands"""
+		if not self._input_buffer:
+			return
+
+		with self._buffer_lock:
+			buffer_snapshot = list(self._input_buffer)
+			self._input_buffer.clear()
+
+		if not buffer_snapshot:
+			return
+
+		# Average the movements over the buffer period
+		avg_x = sum(state.x_axis for state in buffer_snapshot) / len(buffer_snapshot)
+		avg_y = sum(state.y_axis for state in buffer_snapshot) / len(buffer_snapshot)
+		avg_extrusion = sum(state.extrusion for state in buffer_snapshot) / len(buffer_snapshot)
+		avg_retraction = sum(state.retraction for state in buffer_snapshot) / len(buffer_snapshot)
+
+		# Calculate movement distances
+		movement_time = self.movement_update_rate  # seconds
+		x_distance = avg_x * (self.base_speed / 60) * movement_time
+		y_distance = avg_y * (self.base_speed / 60) * movement_time
+
+		# Check if movement is significant
+		total_distance = math.sqrt(x_distance**2 + y_distance**2)
+		if total_distance < self.min_movement:
+			return
+
+		# Calculate new position
+		new_x = max(0, min(self.plugin.maxX, self.current_x + x_distance))
+		new_y = max(0, min(self.plugin.maxY, self.current_y + y_distance))
+
+		# Calculate extrusion based on movement distance
+		e_distance = 0.0
+		if avg_extrusion > 0.1:  # Extrusion threshold
+			e_distance = total_distance * self.max_extrusion_per_mm * avg_extrusion
+		elif avg_retraction > 0.1:  # Retraction threshold
+			e_distance = -total_distance * self.max_extrusion_per_mm * avg_retraction
+
+		# Create movement command
+		command = MovementCommand(
+			x=new_x,
+			y=new_y,
+			e=self.current_e + e_distance,
+			f=self.base_speed
+		)
+
+		# Update current positions
+		self.current_x = new_x
+		self.current_y = new_y
+		self.current_e += e_distance
+
+		# Send command to printer
+		self._send_movement_command(command)
+
+	def _send_movement_command(self, command: MovementCommand):
+		"""Send consolidated movement command to printer"""
 		try:
-			with self._movement_lock:
-				self._printer.commands(['M410'])  # Emergency stop
-				# Reset targets to current position
-				self.target_x = self._plugin.current_x
-				self.target_y = self._plugin.current_y
+			# Generate coordinated movement GCode
+			gcode = f"G1 X{command.x:.3f} Y{command.y:.3f}"
+			if abs(command.e) > 0:
+				gcode += f" E{command.e:.4f}"
+			gcode += f" F{command.f}"
+
+			self.plugin.send(gcode)
+
 		except Exception as e:
-			self._logger.error(f"Error during emergency stop: {str(e)}")
+			self.logger.error(f"Error sending movement command: {str(e)}")
+
+	def get_current_position(self):
+		"""Get current position information"""
+		return {
+			'x': self.current_x,
+			'y': self.current_y,
+			'e': self.current_e
+		}
+	def _handle_buttons(self):
+		"""Handle button press actions"""
+		try:
+			# Check if buttons were just pressed (edge detection)
+			if self.plugin.joy.a_pressed:
+				self.plugin.drawing = not self.plugin.drawing
+				z_height = self.plugin.z_drawing if self.plugin.drawing else self.plugin.z_travel
+				gcode = f'G1 Z{z_height} F1000'
+				self.logger.info(f"Toggling drawing mode: {'Drawing' if self.plugin.drawing else 'Travel'}")
+				self.plugin.send(gcode)
+				time.sleep(0.1)  # Debounce
+
+			if self.plugin.joy.b_pressed:
+				self.logger.info("Homing XY axes")
+				self.plugin.send("G28 X Y")
+				self.current_x = 0.0
+				self.current_y = 0.0
+				self.plugin.current_x = 0.0
+				self.plugin.current_y = 0.0
+				time.sleep(0.1)  # Debounce
+
+			# Handle feedrate adjustments
+			self._handle_feedrate()
+
+		except Exception as e:
+			self.logger.error(f"Error handling buttons: {str(e)}")
+
+	def _handle_feedrate(self):
+		"""Handle feedrate adjustments"""
+		try:
+			if self.plugin.joy.right_button:
+				self.plugin.current_e_feedrate = min(
+					self.plugin.current_e_feedrate + self.plugin._settings.get_float(["feedrate_increment"]),
+					self.plugin._settings.get_float(["max_feedrate"])
+				)
+				if self.plugin.joy.debug_mode:
+					self.logger.info(f"Increased feedrate to: {self.plugin.current_e_feedrate:.1f} mm/s")
+				time.sleep(0.1)
+
+			elif self.plugin.joy.left_button:
+				self.plugin.current_e_feedrate = max(
+					self.plugin.current_e_feedrate - self.plugin._settings.get_float(["feedrate_increment"]),
+					self.plugin._settings.get_float(["min_feedrate"])
+				)
+				if self.plugin.joy.debug_mode:
+					self.logger.info(f"Decreased feedrate to: {self.plugin.current_e_feedrate:.1f} mm/s")
+				time.sleep(0.1)
+
+		except Exception as e:
+			self.logger.error(f"Error handling feedrate: {str(e)}")
+
 
 class UserController:
 	def __init__(self):
@@ -172,27 +290,6 @@ class UserController:
 		self.max_analog_val = math.pow(2, 15)
 		self.debug_mode = False
 		self._logger = logging.getLogger("octoprint.plugins.plasticpilot")
-	
-		# Adjusted threshold configurations for better 180-degree control
-		self.deadzone_threshold = 0.10  # Reduced deadzone for more responsive control
-		self.walk_threshold = 0.40      # Adjusted for smoother transition
-		self.run_threshold = 0.75       # Adjusted for better speed control
-	
-		# Adjusted speed multipliers for smoother acceleration
-		self.walk_speed_multiplier = 0.2   # Slower initial speed for precision
-		self.run_speed_multiplier = 0.6    # Medium speed for controlled movement
-		self.max_speed_multiplier = 1.0    # Full speed
-	
-		# Button states
-		self.right_trigger = 0.0
-		self.left_trigger = 0.0
-		self.right_button = False
-		self.left_button = False
-		
-		# Movement smoothing
-		self.smoothing_factor = 0.2    # Increased smoothing for more fluid movement
-		self.last_x_speed = 0.0
-		self.last_y_speed = 0.0
 
 	def reset_state(self):
 		# Analog inputs with explicit zero state
@@ -202,14 +299,7 @@ class UserController:
 		self.right_y = 0.0
 		self.left_trigger = 0.0
 		self.right_trigger = 0.0
-		self.right_trigger = 0.0
-		self.left_trigger = 0.0
-		
-		# Movement state tracking
-		self.current_movement_state = "idle"  # idle, walking, running, max_speed
-		self.last_movement_time = time.time()
-		self.has_new_movement = False
-		
+
 		# Button states
 		self.a_pressed = False
 		self.b_pressed = False
@@ -234,85 +324,31 @@ class UserController:
 					return False
 
 			return True
-			
+
 		except Exception as e:
 			self._logger.error(f"Error reading gamepad: {str(e)}")
 			return False
 
-	def process_movement(self, axis, current_value, last_speed):
-		"""Process movement with enhanced smoothing"""
-		normalized, multiplier, state = self.calculate_movement_speed(current_value)
-		
-		# Enhanced smoothing with acceleration curve
-		if abs(normalized) > abs(last_speed):
-			# Accelerating - use less smoothing for more responsive acceleration
-			smoothing = self.smoothing_factor * 0.5
-		else:
-			# Decelerating - use full smoothing for gentler stops
-			smoothing = self.smoothing_factor
-			
-		smoothed_speed = (normalized * (1 - smoothing) + last_speed * smoothing)
-	
-		return smoothed_speed, state
-
-	def get_movement(self):
-		"""
-		Get current movement values with smoothing and state information.
-		Left stick controls X-axis (left/right)
-		Right stick controls Y-axis (up/down)
-		"""
-		# Process X movement (left/right on left stick)
-		new_x_speed, x_state = self.process_movement('X', self.left_x, self.last_x_speed)
-	
-		# Process Y movement (up/down on right stick)
-		# Invert Y axis because joystick up is negative but we want positive Y movement
-		new_y_speed, y_state = self.process_movement('Y', -self.right_y, self.last_y_speed)
-	
-		# Update last speeds for next iteration
-		self.last_x_speed = new_x_speed
-		self.last_y_speed = new_y_speed
-	
-		# Determine overall movement state (use the faster of the two axes)
-		states = {"idle": 0, "walking": 1, "running": 2, "max_speed": 3}
-		x_state_val = states[x_state]
-		y_state_val = states[y_state]
-		overall_state = max(x_state, y_state, key=lambda s: states[s])
-	
-		movement_data = {
-			'x_speed': new_x_speed,
-			'y_speed': new_y_speed,
-			'movement_state': overall_state,
-			'x_state': x_state,
-			'y_state': y_state
-		}
-	
-		if self.debug_mode:
-			self._logger.info(f"Movement data: {movement_data}")
-	
-		return movement_data
-
 	def process_event(self, event):
-		"""
-		Process controller events.
-		Left stick is exclusively for X movement.
-		Right stick is exclusively for Y movement.
-		"""
+		"""Process raw controller events into state updates"""
 		try:
 			if self.debug_mode:
 				self._logger.info(f"Raw event: {event.ev_type} - {event.code} - {event.state}")
-				
+
 			if event.ev_type == "Absolute":
-				if event.code == "ABS_X":  # Left stick X axis only
+				if event.code == "ABS_X":     # Left stick X axis
 					self.left_x = event.state
-					self.has_new_movement = True
-				elif event.code == "ABS_RY":  # Right stick Y axis only
+				elif event.code == "ABS_Y":   # Left stick Y axis
+					self.left_y = event.state
+				elif event.code == "ABS_RX":  # Right stick X axis
+					self.right_x = event.state
+				elif event.code == "ABS_RY":  # Right stick Y axis
 					self.right_y = event.state
-					self.has_new_movement = True
-				elif event.code == "ABS_Z":  # Left trigger
+				elif event.code == "ABS_Z":   # Left trigger
 					self.left_trigger = event.state / 255.0  # Normalize to 0-1
 				elif event.code == "ABS_RZ":  # Right trigger
 					self.right_trigger = event.state / 255.0  # Normalize to 0-1
-					
+
 			elif event.ev_type == "Key":
 				if event.code == "BTN_SOUTH":    # A button
 					self.a_pressed = event.state == 1
@@ -326,50 +362,12 @@ class UserController:
 					self.left_button = event.state == 1
 				elif event.code == "BTN_TR":     # Right button
 					self.right_button = event.state == 1
-					
+
 			return True
-			
+
 		except Exception as e:
 			self._logger.error(f"Error processing event: {str(e)}")
 			return False
-	
-	def calculate_movement_speed(self, raw_value):
-		"""
-		Calculate movement speed with improved 180-degree linear control
-		"""
-		# Normalize the raw value to -1.0 to 1.0
-		normalized = raw_value / self.max_analog_val
-		abs_normalized = abs(normalized)
-		
-		# Apply deadzone
-		if abs_normalized < self.deadzone_threshold:
-			return (0.0, 0.0, "idle")
-		
-		# Linear scaling for more predictable movement
-		# Map the active range (deadzone to 1.0) to 0.0 to 1.0
-		scaled = (abs_normalized - self.deadzone_threshold) / (1.0 - self.deadzone_threshold)
-		scaled = min(1.0, max(0.0, scaled))  # Clamp between 0 and 1
-		
-		# Determine movement state and calculate multiplier
-		if scaled < self.walk_threshold:
-			# Walking - linear scaling in precision range
-			state = "walking"
-			multiplier = (scaled / self.walk_threshold) * self.walk_speed_multiplier
-		elif scaled < self.run_threshold:
-			# Running - linear scaling in medium speed range
-			state = "running"
-			progress = (scaled - self.walk_threshold) / (self.run_threshold - self.walk_threshold)
-			multiplier = self.walk_speed_multiplier + (progress * (self.run_speed_multiplier - self.walk_speed_multiplier))
-		else:
-			# Maximum speed - linear scaling in high speed range
-			state = "max_speed"
-			progress = (scaled - self.run_threshold) / (1.0 - self.run_threshold)
-			multiplier = self.run_speed_multiplier + (progress * (self.max_speed_multiplier - self.run_speed_multiplier))
-		
-		# Apply direction while maintaining linear response
-		final_speed = math.copysign(scaled * multiplier, normalized)
-		
-		return (final_speed, multiplier, state)
 
 class PlasticPilot(octoprint.plugin.SettingsPlugin,
 				octoprint.plugin.AssetPlugin,
@@ -394,15 +392,16 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		self.drawing = False  # Track if we're currently drawing
 		self.z_drawing = 0.2  # Z height when drawing
 		self.z_travel = 1.0   # Z height when not drawing
-		self.controller_thread = None  # Initialize the controller thread
 		self.active_controller = None  # Initialize the active controller
 
 		self._position_lock = Lock()  # For protecting position updates
 		self._state_lock = Lock()     # For protecting state variables
 		self._stop_event = Event()    # For clean thread shutdown
-  
+
 		self._extrusion_lock = Lock()  # For protecting extrusion operations
 		self.current_e_feedrate = 2.0  # Default extruder feedrate in mm/s
+
+		self.buffered_controller = None
 
 		# Add logger
 		self._logger = logging.getLogger("octoprint.plugins.plasticpilot")
@@ -491,15 +490,19 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self.maxY = 200.0
 
 	def start_controller_thread(self):
-		"""Start the controller input thread"""
-		if self.controller_thread is not None and self.controller_thread.is_alive():
-			self._logger.info("Controller thread already running")
-			return
-
-		self._stop_event.clear()  # Reset the stop event
+		"""Start the controller system"""
 		try:
+			if self.buffered_controller is not None:
+				self._logger.info("Controller system already running")
+				# Still send status update even if already running
+				self._plugin_manager.send_plugin_message(self._identifier, {
+					"type": "controller_status",
+					"active": True,
+					"controller_id": self.active_controller
+				})
+				return
+
 			self.joy = UserController()
-			# Add explicit debug logging for debug mode status
 			debug_mode = self._settings.get_boolean(["debug_mode"])
 			self._logger.info(f"Starting controller with debug_mode: {debug_mode}")
 			self.joy.debug_mode = debug_mode
@@ -513,64 +516,60 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self.current_x = 0.0
 			self.current_y = 0.0
 
-			# Test logging to verify logger functionality
-			self._logger.info("Testing logger functionality")
+			# Initialize and start buffered controller
+			self.buffered_controller = BufferedController(self)
+			self.buffered_controller.update_settings(self._settings)
+			self.buffered_controller.start()
 
-			self.controller_thread = Thread(target=self.threadAcceptInput)
-			self.controller_thread.daemon = True
-			self.controller_thread.start()
+			# Send status update AFTER successful startup
 			self._plugin_manager.send_plugin_message(self._identifier, {
 				"type": "controller_status",
 				"active": True,
 				"controller_id": self.active_controller
 			})
-			self._logger.info(f"Controller thread started (Debug Mode: {debug_mode})")
+
+			self._logger.info("Controller system started")
+
 		except Exception as e:
-			self._logger.error(f"Failed to start controller thread: {str(e)}")
+			self._logger.error(f"Failed to start controller: {str(e)}")
+			# Send failure status
+			self._plugin_manager.send_plugin_message(self._identifier, {
+				"type": "controller_status",
+				"active": False,
+				"controller_id": None,
+				"error": str(e)
+			})
 			raise
 
 	def stop_controller_thread(self):
 		"""Stop the controller input thread with proper cleanup"""
-		if self.controller_thread is None:
-			return
-
 		self._logger.info("Initiating controller shutdown...")
 
 		try:
+			# Stop the buffered controller first
+			if self.buffered_controller is not None:
+				self._logger.info("Stopping buffered controller...")
+				try:
+					self.buffered_controller.stop()
+				except Exception as e:
+					self._logger.error(f"Error stopping buffered controller: {str(e)}")
+				self.buffered_controller = None
+
 			# Signal the thread to stop
 			self._stop_event.set()
 
-			# Give the thread time to finish its current iteration
-			shutdown_timeout = 3.0  # seconds
-			self._logger.info(f"Waiting up to {shutdown_timeout} seconds for thread to stop...")
-
-			# Wait for thread to finish with timeout
-			start_time = time.time()
-			while self.controller_thread.is_alive():
-				if time.time() - start_time > shutdown_timeout:
-					self._logger.warning("Thread shutdown timed out, forcing termination")
-					break
-				time.sleep(0.1)
-
-			# If thread is still alive after timeout, try one more time
-			if self.controller_thread.is_alive():
-				self._logger.warning("Thread still alive after timeout, attempting final cleanup")
-				try:
-					self.controller_thread.join(timeout=1.0)
-				except Exception as e:
-					self._logger.error(f"Error during final thread cleanup: {str(e)}")
-
-			# Clean up resources
+			# Clean up controller resources
 			if hasattr(self, 'joy') and self.joy is not None:
 				self._logger.info("Cleaning up controller resources...")
 				try:
 					del self.joy
 				except Exception as e:
 					self._logger.error(f"Error cleaning up controller object: {str(e)}")
-			self.joy = None
+				self.joy = None
 
-			# Reset the thread
-			self.controller_thread = None
+			# Reset positions
+			self.current_x = 0.0
+			self.current_y = 0.0
 
 			# Send final status update
 			self._plugin_manager.send_plugin_message(self._identifier, {
@@ -586,243 +585,8 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		finally:
 			# Ensure these are always reset even if there's an error
 			self.joy = None
-			self.controller_thread = None
-
-	def move_to_position(self):
-		"""Enhanced position updates with better error handling"""
-		try:
-			gcode = f'G1 X{self.current_x:.2f} Y{self.current_y:.2f} F{self.movement_speed}'
-			self._logger.info(f"Sending movement: {gcode}")
-			self._printer.commands([gcode])
-		except Exception as e:
-			self._logger.error(f"Error sending movement command: {str(e)}")
-   
-	def handle_extrusion(self):
-		"""Handle extrusion based on trigger states"""
-		if not self.joy:
-			return
-
-		try:
-			with self._extrusion_lock:
-				# Track cumulative extrusion amount
-				if not hasattr(self, 'current_e_position'):
-					self.current_e_position = 0.0
-
-				# Handle extrusion with right trigger
-				if self.joy.right_trigger > 0.1:  # Small deadzone
-					# Set absolute extrusion mode
-					self.send("M82")  # Switch to absolute E movements
-					
-					# Convert current_e_feedrate from mm/s to mm/min for G-code
-					e_feedrate_mmmin = self.current_e_feedrate * 60
-					amount = float(self._settings.get(["extrusion_amount"]))
-					# Scale amount by trigger pressure
-					scaled_amount = amount * self.joy.right_trigger
-					# Add to current position
-					self.current_e_position += scaled_amount
-					
-					gcode = f"G1 E{self.current_e_position:.3f} F{e_feedrate_mmmin:.1f}"
-					self.send(gcode)
-					if self.joy.debug_mode:
-						self._logger.info(f"Extruding: {scaled_amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s (Total: {self.current_e_position:.3f}mm)")
-
-				# Handle retraction with left trigger
-				elif self.joy.left_trigger > 0.1:  # Small deadzone
-					# Set absolute extrusion mode
-					self.send("M82")  # Switch to absolute E movements
-					
-					retraction_speed = float(self._settings.get(["retraction_speed"]))
-					# Convert retraction speed from mm/s to mm/min for G-code
-					retraction_feedrate = retraction_speed * 60
-					amount = float(self._settings.get(["retraction_amount"]))
-					# Scale amount by trigger pressure
-					scaled_amount = amount * self.joy.left_trigger
-					# Subtract from current position
-					self.current_e_position -= scaled_amount
-					
-					gcode = f"G1 E{self.current_e_position:.3f} F{retraction_feedrate:.1f}"
-					self.send(gcode)
-					if self.joy.debug_mode:
-						self._logger.info(f"Retracting: {scaled_amount:.3f}mm at {retraction_speed:.1f}mm/s (Total: {self.current_e_position:.3f}mm)")
-
-		except Exception as e:
-			self._logger.error(f"Error during extrusion handling: {str(e)}")
-
-
-	def handle_feedrate(self):
-		"""Handle extruder feedrate adjustments based on button states"""
-		if not self.joy:
-			return
-
-		try:
-			increment = float(self._settings.get(["feedrate_increment"]))
-			min_feedrate = float(self._settings.get(["min_feedrate"]))
-			max_feedrate = float(self._settings.get(["max_feedrate"]))
-
-			if self.joy.right_button:
-				# Increase feedrate
-				self.current_e_feedrate = min(self.current_e_feedrate + increment, max_feedrate)
-				if self.joy.debug_mode:
-					self._logger.info(f"Increased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
-				time.sleep(0.1)  # Debounce
-
-			elif self.joy.left_button:
-				# Decrease feedrate
-				self.current_e_feedrate = max(self.current_e_feedrate - increment, min_feedrate)
-				if self.joy.debug_mode:
-					self._logger.info(f"Decreased extruder feedrate to: {self.current_e_feedrate:.1f} mm/s")
-				time.sleep(0.1)  # Debounce
-
-		except Exception as e:
-			self._logger.error(f"Error during feedrate handling: {str(e)}")
-
-
-	def threadAcceptInput(self):
-		"""Enhanced thread function with coordinated movement processing"""
-		self._logger.info('Initializing controller mode' + 
-						(' (DEBUG MODE)' if self.joy.debug_mode else ''))
-		
-		# Initialize control parameters
-		error_count = 0
-		max_errors = 10
-		last_movement_time = time.time()
-		
-		# Initialize thread parameters
-		self._update_thread_parameters()
-		
-		# Update UserController thresholds from settings
-		self.joy.deadzone_threshold = self._thread_parameters['deadzone_threshold']
-		self.joy.walk_threshold = self._thread_parameters['walk_threshold']
-		self.joy.run_threshold = self._thread_parameters['run_threshold']
-		self.joy.walk_speed_multiplier = self._thread_parameters['walk_speed_multiplier']
-		self.joy.run_speed_multiplier = self._thread_parameters['run_speed_multiplier']
-		self.joy.max_speed_multiplier = self._thread_parameters['max_speed_multiplier']
-		self.joy.smoothing_factor = float(self._settings.get(["smoothing_factor"])) / 100.0
-		
-		# Initialize movement coordinator
-		movement_coordinator = MovementCoordinator(self)
-		movement_coordinator.update_settings(self._settings)
-		
-		# Speed settings for different movement states
-		base_speed = self._thread_parameters['base_speed']
-		speed_settings = {
-			'idle': 0,
-			'walking': base_speed * self._thread_parameters['walk_speed_multiplier'],
-			'running': base_speed * self._thread_parameters['run_speed_multiplier'],
-			'max_speed': base_speed * self._thread_parameters['max_speed_multiplier']
-		}
-		
-		while not self._stop_event.is_set():
-			try:
-				if not self.bConnected or not self.joy:
-					error_count += 1
-					if error_count >= max_errors:
-						self._logger.error("Connection lost or controller disconnected")
-						break
-					time.sleep(0.1)
-					continue
-				
-				# Read controller state
-				if not self.joy.read():
-					error_count += 1
-					if error_count >= max_errors:
-						self._logger.error("Failed to read controller state")
-						break
-					continue
-				
-				error_count = 0  # Reset error count on successful read
-				current_time = time.time()
-				
-				# Get and process movement data
-				movement_data = self.joy.get_movement()
-				current_speed = speed_settings[movement_data['movement_state']]
-				
-				# Process movement if coordinator indicates it's time
-				if movement_coordinator.should_update():
-					time_delta = current_time - last_movement_time
-					if movement_coordinator.process_movement(movement_data, current_speed, time_delta):
-						if self.joy.debug_mode:
-							self._logger.info(
-								f"Moving to X:{self.current_x:.2f} Y:{self.current_y:.2f} "
-								f"(State: {movement_data['movement_state']}, "
-								f"Speed: {current_speed:.1f} mm/min)"
-							)
-					last_movement_time = current_time
-
-				# Handle extrusion with right trigger
-				if self.joy.right_trigger > 0.1:
-					e_feedrate_mmmin = self.current_e_feedrate * 60
-					amount = float(self._settings.get(["extrusion_amount"])) * self.joy.right_trigger
-					movement_coordinator.process_extrusion(amount, e_feedrate_mmmin)
-					if self.joy.debug_mode:
-						self._logger.info(f"Extruding: {amount:.3f}mm at {self.current_e_feedrate:.1f}mm/s")
-
-				# Handle retraction with left trigger
-				elif self.joy.left_trigger > 0.1:
-					retraction_speed = float(self._settings.get(["retraction_speed"]))
-					retraction_feedrate = retraction_speed * 60
-					amount = float(self._settings.get(["retraction_amount"])) * self.joy.left_trigger
-					movement_coordinator.process_extrusion(-amount, retraction_feedrate)
-					if self.joy.debug_mode:
-						self._logger.info(f"Retracting: {amount:.3f}mm at {retraction_speed:.1f}mm/s")
-
-				# Handle feedrate adjustments
-				self.handle_feedrate()
-				
-				# Process button actions
-				if self.joy.a_pressed:
-					self.drawing = not self.drawing
-					z_height = self.z_drawing if self.drawing else self.z_travel
-					gcode = f'G1 Z{z_height} F1000'
-					self._logger.info(f"Toggling drawing mode: {'Drawing' if self.drawing else 'Travel'}")
-					self.send(gcode)
-					time.sleep(0.1)  # Debounce
-				
-				if self.joy.b_pressed:
-					self._logger.info("Homing XY axes")
-					self.send("G28 X Y")
-					self.current_x = 0.0
-					self.current_y = 0.0
-					movement_coordinator.target_x = 0.0
-					movement_coordinator.target_y = 0.0
-					time.sleep(0.1)  # Debounce
-				
-				# if self.joy.y_pressed:
-				# 	self._logger.info("Initiating shake clear")
-				# 	self.shake_clear()
-				# 	movement_coordinator.target_x = 0.0
-				# 	movement_coordinator.target_y = 0.0
-				# 	time.sleep(0.1)  # Debounce
-				
-				# Small sleep to prevent CPU thrashing
-				threading.Event().wait(0.005)
-				
-			except Exception as e:
-				self._logger.error(f"Error in control thread: {str(e)}")
-				error_count += 1
-				if error_count >= max_errors:
-					self._logger.error("Too many errors, stopping controller thread")
-					break
-		
-		self._logger.info('Controller thread terminated')
-
-	def _update_thread_parameters(self):
-		"""Update running thread parameters based on current settings"""
-		if not hasattr(self, '_thread_parameters'):
-			self._thread_parameters = {}
-			
-		self._thread_parameters.update({
-			'movement_check_interval': float(self._settings.get(["movement_check_interval"])) / 1000.0,
-			'command_delay': float(self._settings.get(["command_delay"])) / 1000.0,
-			'min_movement': float(self._settings.get(["min_movement"])),
-			'base_speed': float(self._settings.get(["base_speed"])),
-			'deadzone_threshold': float(self._settings.get(["deadzone_threshold"])) / 100.0,
-			'walk_threshold': float(self._settings.get(["walk_threshold"])) / 100.0,
-			'run_threshold': float(self._settings.get(["run_threshold"])) / 100.0,
-			'walk_speed_multiplier': float(self._settings.get(["walk_speed_multiplier"])) / 100.0,
-			'run_speed_multiplier': float(self._settings.get(["run_speed_multiplier"])) / 100.0,
-			'max_speed_multiplier': float(self._settings.get(["max_speed_multiplier"])) / 100.0
-		})
+			self.buffered_controller = None
+			self.active_controller = None
 
 	def list_available_controllers(self):
 		"""Actively scan and list all available controllers"""
@@ -857,23 +621,6 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self._logger.error(f"Error scanning for controllers: {str(e)}")
 			self._logger.exception("Detailed error information:")
 			return []
-
-	# def shake_clear(self):
-	# 	# Lift the pen
-	# 	self.drawing = False
-	# 	self.send(f'G1 Z{self.z_travel} F1000')
-
-	# 	# Perform rapid zigzag motion
-	# 	for i in range(4):
-	# 		self.send(f'G1 X{5} Y{5} F3000')
-	# 		self.send(f'G1 X{self.maxX-5} Y{self.maxY-5} F3000')
-	# 		self.send(f'G1 X{self.maxX-5} Y{5} F3000')
-	# 		self.send(f'G1 X{5} Y{self.maxY-5} F3000')
-
-	# 	# Return to starting position
-	# 	self.current_x = 0
-	# 	self.current_y = 0
-	# 	self.send('G28 X Y')
 
 	def on_after_startup(self):
 		self._logger.info("Controller starting up")
@@ -912,40 +659,32 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		)
 
 	def on_settings_save(self, data):
+		"""Handle saving and updating all settings"""
 		# Call parent implementation first to save all settings
 		octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
-		
+
 		try:
-			# If we have an active controller, update its settings
-			if self.joy is not None:
-				# Update thresholds
-				self.joy.deadzone_threshold = float(self._settings.get(["deadzone_threshold"])) / 100.0
-				self.joy.walk_threshold = float(self._settings.get(["walk_threshold"])) / 100.0
-				self.joy.run_threshold = float(self._settings.get(["run_threshold"])) / 100.0
-				
-				# Update speed multipliers
-				self.joy.walk_speed_multiplier = float(self._settings.get(["walk_speed_multiplier"])) / 100.0
-				self.joy.run_speed_multiplier = float(self._settings.get(["run_speed_multiplier"])) / 100.0
-				self.joy.max_speed_multiplier = float(self._settings.get(["max_speed_multiplier"])) / 100.0
-				
-				# Update smoothing
-				self.joy.smoothing_factor = float(self._settings.get(["smoothing_factor"])) / 100.0
-				
-				# Update debug mode
-				self.joy.debug_mode = self._settings.get_boolean(["debug_mode"])
-				
-			# Update base movement settings
+			# Update base settings that don't require active controller
 			self.movement_speed = float(self._settings.get(["base_speed"]))
 			self.z_drawing = float(self._settings.get(["z_drawing"]))
 			self.z_travel = float(self._settings.get(["z_travel"]))
-			
-			# Update thread parameters if the thread is running
-			if self.controller_thread is not None and self.controller_thread.is_alive():
-				self._update_thread_parameters()
-				self._logger.info("Updated controller settings successfully")
-				
+
+			# Update debug mode if controller is active
+			if self.joy is not None:
+				self.joy.debug_mode = self._settings.get_boolean(["debug_mode"])
+
+			# Update buffered controller if active
+			if self.buffered_controller is not None:
+				self.buffered_controller.update_settings(self._settings)
+				self._logger.info("Controller settings updated successfully")
+
+			# Log general settings update
+			self._logger.info("Settings saved and applied successfully")
+
 		except Exception as e:
 			self._logger.error(f"Error updating settings: {str(e)}")
+			# Re-raise to ensure UI is notified of failure
+			raise
 
 	def get_assets(self):
 		return dict(
@@ -1059,14 +798,14 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			try:
 				# Get default settings
 				defaults = self.get_settings_defaults()
-	
+
 				# Update all settings to defaults
 				self._settings.set([], defaults)
 				self._settings.save()
-	
+
 				# Update current instance settings
 				self.on_settings_save(defaults)
-	
+
 				return jsonify({
 					"success": True,
 					"defaults": defaults
