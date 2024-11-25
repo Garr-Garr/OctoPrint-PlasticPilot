@@ -42,7 +42,12 @@ An OctoPrint plugin that lets you control your 3D printer using a USB game contr
 
 ## Controller Support
 - Currently tested with:
-  - Xbox One controller (USB-C to USB-A)
+  - Xbox One controller via USB cable
+- [Py Inputs claims it works:](https://inputs.readthedocs.io/en/latest/user/hardwaresupport.html#hardwaresupport)
+  - Xbox 360 Controller via USB cable
+  - PS4 Controller via USB cable
+  - PS3 Controller via USB cable (press PS button if controller is not awake)
+  - Pi-Hut SNES Style USB Gamepad
 - Planned future support:
   - Custom profiles for popular controllers
   - Bluetooth controller support
