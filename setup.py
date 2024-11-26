@@ -10,8 +10,9 @@ plugin_author =              "Garrett Broters"
 plugin_author_email =        "gbroters@gmail.com"
 plugin_url =                 "https://github.com/Garr-Garr/OctoPrint-PlasticPilot"
 plugin_license =             "AGPLv3"
-plugin_requires = ["inputs>=0.5"]  # For Xbox controller input handling
-
+plugin_requires = [
+	"inputs>=0.5",  # For Xbox controller input handling
+]
 ### --------------------------------------------------------------------------------------------------------------------
 ### More advanced options that you usually shouldn't have to touch follow after this point
 ### --------------------------------------------------------------------------------------------------------------------

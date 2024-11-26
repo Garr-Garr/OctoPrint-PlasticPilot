@@ -13,276 +13,21 @@ from collections import deque
 from dataclasses import dataclass
 from typing import List, Deque
 from queue import Queue
+from dataclasses import dataclass
+from typing import List, Deque, Optional
 import math
 import time
 import logging
 import json
 
-@dataclass
-class ControllerState:
-	"""Represents a single controller state snapshot"""
-	x_axis: float = 0.0  # Left stick X
-	y_axis: float = 0.0  # Right stick Y
-	extrusion: float = 0.0  # Right trigger
-	retraction: float = 0.0  # Left trigger
-	timestamp: float = 0.0
-
-@dataclass
-class MovementCommand:
-	"""Represents a consolidated movement command"""
-	x: float = 0.0
-	y: float = 0.0
-	e: float = 0.0
-	f: float = 0.0  # Feedrate
-
-class BufferedController:
-	"""Handles buffered input processing and movement coordination"""
-	def __init__(self, plugin, max_buffer_size=100):
-		self.plugin = plugin
-		self.logger = plugin._logger
-		self._input_buffer: Deque[ControllerState] = deque(maxlen=max_buffer_size)
-		self._command_queue: Queue[MovementCommand] = Queue()
-		self._movement_thread = None
-		self._input_thread = None
-		self._stop_event = threading.Event()
-
-		# Movement state
-		self.current_x = 0.0
-		self.current_y = 0.0
-		self.current_e = 0.0
-		self.last_extrude_position = None
-
-		# Threading control
-		self._buffer_lock = threading.Lock()
-		self._state_lock = threading.Lock()
-
-		# Movement parameters
-		self.min_movement = 0.01  # mm
-		self.max_extrusion_per_mm = 0.1  # mm of filament per mm of travel
-		self.input_poll_rate = 0.001  # 1ms
-		self.movement_update_rate = 0.1  # 100ms
-
-		# Initialize settings from plugin
-		self.update_settings(plugin._settings)
-
-	def update_settings(self, settings):
-		"""Update controller settings from plugin settings"""
-		with self._state_lock:
-			self.base_speed = float(settings.get(["base_speed"]))
-			self.min_movement = float(settings.get(["min_movement"]))
-			self.extrusion_speed = float(settings.get(["extrusion_speed"]))
-			self.retraction_speed = float(settings.get(["retraction_speed"]))
-			self.max_extrusion_per_mm = float(settings.get(["extrusion_amount"]))
-
-			# Update timing parameters
-			self.movement_update_rate = float(settings.get(["movement_check_interval"])) / 1000.0  # Convert to seconds
-
-			# Update debugging
-			if hasattr(self.plugin, 'joy') and self.plugin.joy:
-				self.plugin.joy.debug_mode = settings.get_boolean(["debug_mode"])
-
-	def start(self):
-		"""Start the input and movement processing threads"""
-		self._stop_event.clear()
-
-		# Start input polling thread
-		self._input_thread = threading.Thread(target=self._input_polling_loop)
-		self._input_thread.daemon = True
-		self._input_thread.start()
-
-		# Start movement processing thread
-		self._movement_thread = threading.Thread(target=self._movement_processing_loop)
-		self._movement_thread.daemon = True
-		self._movement_thread.start()
-
-		self.logger.info("Buffered controller system started")
-
-	def stop(self):
-		"""Stop all processing threads"""
-		self._stop_event.set()
-
-		if self._input_thread:
-			self._input_thread.join(timeout=1.0)
-		if self._movement_thread:
-			self._movement_thread.join(timeout=1.0)
-
-		self._input_buffer.clear()
-		while not self._command_queue.empty():
-			self._command_queue.get()
-
-		self.logger.info("Buffered controller system stopped")
-
-	def _input_polling_loop(self):
-		"""Rapidly poll controller input and add to buffer"""
-		last_poll_time = time.time()
-
-		while not self._stop_event.is_set():
-			current_time = time.time()
-			if current_time - last_poll_time >= self.input_poll_rate:
-				try:
-					if self.plugin.joy and self.plugin.joy.read():
-						# Handle button presses
-						self._handle_buttons()
-
-						with self._buffer_lock:
-							state = ControllerState(
-								x_axis=self.plugin.joy.left_x / self.plugin.joy.max_analog_val,
-								y_axis=-self.plugin.joy.right_y / self.plugin.joy.max_analog_val,  # Invert Y
-								extrusion=self.plugin.joy.right_trigger,
-								retraction=self.plugin.joy.left_trigger,
-								timestamp=current_time
-							)
-							self._input_buffer.append(state)
-					last_poll_time = current_time
-				except Exception as e:
-					self.logger.error(f"Error polling input: {str(e)}")
-
-			# Small sleep to prevent CPU thrashing
-			time.sleep(0.0005)  # 0.5ms sleep
-
-	def _movement_processing_loop(self):
-		"""Process buffered input and generate movement commands"""
-		last_process_time = time.time()
-
-		while not self._stop_event.is_set():
-			current_time = time.time()
-			if current_time - last_process_time >= self.movement_update_rate:
-				try:
-					self._process_buffered_input()
-					last_process_time = current_time
-				except Exception as e:
-					self.logger.error(f"Error processing movement: {str(e)}")
-
-			# Small sleep to prevent CPU thrashing
-			time.sleep(0.001)  # 1ms sleep
-
-	def _process_buffered_input(self):
-		"""Process accumulated input buffer into movement commands"""
-		if not self._input_buffer:
-			return
-
-		with self._buffer_lock:
-			buffer_snapshot = list(self._input_buffer)
-			self._input_buffer.clear()
-
-		if not buffer_snapshot:
-			return
-
-		# Average the movements over the buffer period
-		avg_x = sum(state.x_axis for state in buffer_snapshot) / len(buffer_snapshot)
-		avg_y = sum(state.y_axis for state in buffer_snapshot) / len(buffer_snapshot)
-		avg_extrusion = sum(state.extrusion for state in buffer_snapshot) / len(buffer_snapshot)
-		avg_retraction = sum(state.retraction for state in buffer_snapshot) / len(buffer_snapshot)
-
-		# Calculate movement distances
-		movement_time = self.movement_update_rate  # seconds
-		x_distance = avg_x * (self.base_speed / 60) * movement_time
-		y_distance = avg_y * (self.base_speed / 60) * movement_time
-
-		# Check if movement is significant
-		total_distance = math.sqrt(x_distance**2 + y_distance**2)
-		if total_distance < self.min_movement:
-			return
-
-		# Calculate new position
-		new_x = max(0, min(self.plugin.maxX, self.current_x + x_distance))
-		new_y = max(0, min(self.plugin.maxY, self.current_y + y_distance))
-
-		# Calculate extrusion based on movement distance
-		e_distance = 0.0
-		if avg_extrusion > 0.1:  # Extrusion threshold
-			e_distance = total_distance * self.max_extrusion_per_mm * avg_extrusion
-		elif avg_retraction > 0.1:  # Retraction threshold
-			e_distance = -total_distance * self.max_extrusion_per_mm * avg_retraction
-
-		# Create movement command
-		command = MovementCommand(
-			x=new_x,
-			y=new_y,
-			e=self.current_e + e_distance,
-			f=self.base_speed
-		)
-
-		# Update current positions
-		self.current_x = new_x
-		self.current_y = new_y
-		self.current_e += e_distance
-
-		# Send command to printer
-		self._send_movement_command(command)
-
-	def _send_movement_command(self, command: MovementCommand):
-		"""Send consolidated movement command to printer"""
-		try:
-			# Generate coordinated movement GCode
-			gcode = f"G1 X{command.x:.3f} Y{command.y:.3f}"
-			if abs(command.e) > 0:
-				gcode += f" E{command.e:.4f}"
-			gcode += f" F{command.f}"
-
-			self.plugin.send(gcode)
-
-		except Exception as e:
-			self.logger.error(f"Error sending movement command: {str(e)}")
-
-	def get_current_position(self):
-		"""Get current position information"""
-		return {
-			'x': self.current_x,
-			'y': self.current_y,
-			'e': self.current_e
-		}
-	def _handle_buttons(self):
-		"""Handle button press actions"""
-		try:
-			# Check if buttons were just pressed (edge detection)
-			if self.plugin.joy.a_pressed:
-				self.plugin.drawing = not self.plugin.drawing
-				z_height = self.plugin.z_drawing if self.plugin.drawing else self.plugin.z_travel
-				gcode = f'G1 Z{z_height} F1000'
-				self.logger.info(f"Toggling drawing mode: {'Drawing' if self.plugin.drawing else 'Travel'}")
-				self.plugin.send(gcode)
-				time.sleep(0.1)  # Debounce
-
-			if self.plugin.joy.b_pressed:
-				self.logger.info("Homing XY axes")
-				self.plugin.send("G28 X Y")
-				self.current_x = 0.0
-				self.current_y = 0.0
-				self.plugin.current_x = 0.0
-				self.plugin.current_y = 0.0
-				time.sleep(0.1)  # Debounce
-
-			# Handle feedrate adjustments
-			self._handle_feedrate()
-
-		except Exception as e:
-			self.logger.error(f"Error handling buttons: {str(e)}")
-
-	def _handle_feedrate(self):
-		"""Handle feedrate adjustments"""
-		try:
-			if self.plugin.joy.right_button:
-				self.plugin.current_e_feedrate = min(
-					self.plugin.current_e_feedrate + self.plugin._settings.get_float(["feedrate_increment"]),
-					self.plugin._settings.get_float(["max_feedrate"])
-				)
-				if self.plugin.joy.debug_mode:
-					self.logger.info(f"Increased feedrate to: {self.plugin.current_e_feedrate:.1f} mm/s")
-				time.sleep(0.1)
-
-			elif self.plugin.joy.left_button:
-				self.plugin.current_e_feedrate = max(
-					self.plugin.current_e_feedrate - self.plugin._settings.get_float(["feedrate_increment"]),
-					self.plugin._settings.get_float(["min_feedrate"])
-				)
-				if self.plugin.joy.debug_mode:
-					self.logger.info(f"Decreased feedrate to: {self.plugin.current_e_feedrate:.1f} mm/s")
-				time.sleep(0.1)
-
-		except Exception as e:
-			self.logger.error(f"Error handling feedrate: {str(e)}")
-
+from .models import (
+    ControllerState,
+    MovementCommand,
+    MovementVector,
+    AccelerationProfile,
+    MovementCoordinator
+)
+from .bufferedController import BufferedController
 
 class UserController:
 	def __init__(self):
@@ -401,7 +146,10 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 		self._extrusion_lock = Lock()  # For protecting extrusion operations
 		self.current_e_feedrate = 2.0  # Default extruder feedrate in mm/s
 
-		self.buffered_controller = None
+		self.buffered_controller = BufferedController(
+			self,
+			acceleration=1200  # Use your printer's acceleration value
+		)
 
 		# Add logger
 		self._logger = logging.getLogger("octoprint.plugins.plasticpilot")
@@ -517,7 +265,10 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			self.current_y = 0.0
 
 			# Initialize and start buffered controller
-			self.buffered_controller = BufferedController(self)
+			self.buffered_controller = BufferedController(
+				self,
+				acceleration=1200  # TODO: Use your printer's acceleration value
+			)
 			self.buffered_controller.update_settings(self._settings)
 			self.buffered_controller.start()
 
