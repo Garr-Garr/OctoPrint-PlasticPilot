@@ -390,14 +390,14 @@ class PlasticPilot(octoprint.plugin.SettingsPlugin,
 			movement_check_interval=25,	# 25ms
 			command_delay=20,			# 20ms
 			smoothing_factor=20,		# percentage
-			min_movement=0.025,			# 0.025mm
+			min_movement=0.2,			# 0.2mm
 			# Speed threshold settings
-			deadzone_threshold=10,		# percentage
-			walk_threshold=40,			# percentage
-			run_threshold=75,			# percentage
-			walk_speed_multiplier=40,	# percentage
-			run_speed_multiplier=80,	# percentage
-			max_speed_multiplier=100,	# percentage
+			deadzone_threshold=20,		# percentage
+			walk_threshold=85,			# percentage
+			run_threshold=95,			# percentage
+			walk_speed_multiplier=2,	# percentage
+			run_speed_multiplier=4,	# percentage
+			max_speed_multiplier=6,	# percentage
 			# Extrusion settings
 			extrusion_speed=5.0,        # mm/s for extrusion
 			retraction_speed=25.0,      # mm/s for retraction

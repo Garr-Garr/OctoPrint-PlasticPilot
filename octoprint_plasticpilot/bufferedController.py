@@ -33,7 +33,7 @@ class BufferedController:
 		self.base_speed = 3000  # mm/min
 		self.input_poll_rate = 0.025  # 25ms
 		self.movement_update_rate = 0.020  # 20ms
-		self.min_movement = 0.025  # mm
+		self.min_movement = 0.5  # mm
 		self.max_extrusion_per_mm = 0.1  # mm of filament per mm moved
 		self.current_x = 0.0
 		self.current_y = 0.0
@@ -306,44 +306,35 @@ class BufferedController:
 		if not self._input_buffer:
 			return
 
-		# Collect input over larger time window (100ms)
-		aggregation_window = 0.100  # 100ms
+		# Reduce aggregation window for faster response
+		aggregation_window = 0.010  # Reduced from 0.05 to 0.010 seconds
 		current_time = time.time()
 
 		with self._buffer_lock:
-			# Filter inputs within our time window
-			valid_inputs = [
-				state for state in self._input_buffer
-				if current_time - state.timestamp < aggregation_window
-			]
-			self._input_buffer.clear()
+			# Just take the most recent input state
+			if len(self._input_buffer) > 0:
+				latest_state = self._input_buffer[-1]
+				self._input_buffer.clear()
+			else:
+				return
 
-		if not valid_inputs:
-			return
-
-		# Calculate aggregate movement
-		total_x = sum(state.x_axis for state in valid_inputs)
-		total_y = sum(state.y_axis for state in valid_inputs)
-		avg_x = total_x / len(valid_inputs)
-		avg_y = total_y / len(valid_inputs)
-
-		# Apply smoothing
-		smoothed_x = self.input_smoothing * self.last_x + (1 - self.input_smoothing) * avg_x
-		smoothed_y = self.input_smoothing * self.last_y + (1 - self.input_smoothing) * avg_y
+		# Apply minimal smoothing for faster response
+		smoothed_x = 0.1 * self.last_x + 0.9 * latest_state.x_axis
+		smoothed_y = 0.1 * self.last_y + 0.9 * latest_state.y_axis
 
 		# Store for next iteration
 		self.last_x = smoothed_x
 		self.last_y = smoothed_y
 
-		# Convert to target speeds (mm/s)
-		x_speed = smoothed_x * (self.base_speed / 60)
-		y_speed = smoothed_y * (self.base_speed / 60)
+		# Convert to target speeds with increased base speed
+		x_speed = smoothed_x * (6000 / 60)  # Increased from 3000 to 6000 mm/min
+		y_speed = smoothed_y * (6000 / 60)
 
 		# Calculate movement magnitude and normalize if needed
 		speed_magnitude = math.sqrt(x_speed*x_speed + y_speed*y_speed)
-		if speed_magnitude > 0:
+		if abs(x_speed) > 0.01 or abs(y_speed) > 0.01:  # More sensitive threshold
 			# Calculate target position based on aggregated movement
-			move_time = aggregation_window  # Use our window time
+			move_time = aggregation_window
 			target_x = self.current_x + (x_speed * move_time)
 			target_y = self.current_y + (y_speed * move_time)
 
@@ -357,42 +348,33 @@ class BufferedController:
 			distance = math.sqrt(dx*dx + dy*dy)
 
 			if distance >= self.min_movement:
-				# Calculate appropriate feedrate based on distance and time
-				feedrate = (distance / move_time) * 60  # Convert to mm/min
+				# Calculate appropriate feedrate with higher minimum speed
+				min_feedrate = 2000  # Increased minimum feedrate
+				max_feedrate = 6000  # Maximum feedrate
 
-				# Add movement to coordinator with calculated feedrate
-				self.movement_coordinator.add_movement(
-					dx / move_time,  # Convert to velocity
-					dy / move_time,
-					min(feedrate / 60, self.base_speed / 60)  # Limit to base speed
+				# Calculate and scale feedrate based on joystick position
+				stick_magnitude = math.sqrt(smoothed_x*smoothed_x + smoothed_y*smoothed_y)
+				feedrate = min_feedrate + (max_feedrate - min_feedrate) * stick_magnitude
+
+				# Create direct movement command
+				command = MovementCommand(
+					x=target_x,
+					y=target_y,
+					e=self.current_e,
+					f=feedrate  # Direct feedrate without movement coordinator
 				)
 
-				# Get processed movement with acceleration
-				movement = self.movement_coordinator.process_movement(move_time)
-				if movement:
-					# Calculate extrusion if needed
-					e_distance = self._calculate_extrusion(distance, valid_inputs)
+				# Update positions
+				self.current_x = target_x
+				self.current_y = target_y
 
-					# Create and send movement command
-					command = MovementCommand(
-						x=target_x,
-						y=target_y,
-						e=self.current_e + e_distance,
-						f=movement.f
-					)
+				# Send immediately with minimal delay
+				last_command_time = getattr(self, '_last_command_time', 0)
+				time_since_last = current_time - last_command_time
 
-					# Update positions
-					self.current_x = target_x
-					self.current_y = target_y
-					self.current_e += e_distance
-
-					# Send command with rate limiting
-					last_command_time = getattr(self, '_last_command_time', 0)
-					time_since_last = current_time - last_command_time
-
-					if time_since_last >= self.movement_update_rate:
-						self._send_movement_command(command)
-						self._last_command_time = current_time
+				if time_since_last >= 0.010:  # Reduced from 0.02 to 0.010 seconds
+					self._send_movement_command(command)
+					self._last_command_time = current_time
 
 	def _calculate_extrusion(self, distance: float, states: List[ControllerState]) -> float:
 		"""Calculate extrusion amount based on movement distance and trigger states"""
